@@ -17,14 +17,14 @@ impl BinanceAgent {
     }
 
     fn build_ws_url(&self) -> String {
-        // Combined stream: wss://stream.binance.com:9443/stream?streams=btcusdt@trade/ethusdt@trade
+        // Combined stream: wss://stream.binance.us:9443/stream?streams=btcusdt@trade/ethusdt@trade
         let streams = self
             .symbols
             .iter()
             .map(|s| format!("{}@trade", s))
             .collect::<Vec<_>>()
             .join("/");
-        format!("wss://stream.binance.com:9443/stream?streams={}", streams)
+        format!("wss://stream.binance.us:9443/stream?streams={}", streams)
     }
 }
 
