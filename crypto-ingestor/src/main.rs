@@ -1,8 +1,10 @@
 mod agent;
 mod agents;
-mod canonical;
 
 use agents::{available_agents, make_agent};
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+use tokio::process::Command;
+use tokio::sync::mpsc;
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main(flavor = "multi_thread")]
@@ -19,11 +21,60 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         eprintln!("  ingestor binance:btcusdt");
         eprintln!("  ingestor binance:btcusdt,ethusdt binance:solusdt");
         eprintln!("Available:");
-        for a in available_agents() { eprintln!("  - {a}"); }
+        for a in available_agents() {
+            eprintln!("  - {a}");
+        }
         std::process::exit(2);
     }
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    // spawn canonicalizer process
+    let exe = std::env::current_exe()?;
+    let canon_path = exe.with_file_name("canonicalizer");
+    if !canon_path.exists() {
+        let mut build = Command::new("cargo");
+        build.arg("build").arg("--bin").arg("canonicalizer");
+        if !cfg!(debug_assertions) {
+            build.arg("--release");
+        }
+        let status = build.status().await?;
+        if !status.success() {
+            return Err("failed to build canonicalizer".into());
+        }
+    }
+    let mut canon_child = Command::new(&canon_path)
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .spawn()?;
+
+    let canon_stdin = canon_child.stdin.take().expect("canonicalizer stdin");
+    let canon_stdout = canon_child.stdout.take().expect("canonicalizer stdout");
+
+    let (tx, mut rx) = mpsc::channel::<String>(100);
+
+    // writer task
+    tokio::spawn(async move {
+        let mut stdin = canon_stdin;
+        while let Some(line) = rx.recv().await {
+            if stdin.write_all(line.as_bytes()).await.is_err() {
+                break;
+            }
+            if stdin.write_all(b"\n").await.is_err() {
+                break;
+            }
+        }
+    });
+
+    // reader task
+    tokio::spawn(async move {
+        let mut reader = tokio::io::BufReader::new(canon_stdout).lines();
+        let mut out = tokio::io::stdout();
+        while let Ok(Some(line)) = reader.next_line().await {
+            let _ = out.write_all(line.as_bytes()).await;
+            let _ = out.write_all(b"\n").await;
+        }
+    });
 
     let mut handles = Vec::new();
     for spec in specs.drain(..) {
@@ -31,9 +82,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             Some(mut agent) => {
                 let rx = shutdown_rx.clone(); // no need for `mut`
                 let name = agent.name();
+                let tx_clone = tx.clone();
                 tracing::info!(%spec, agent=%name, "spawning agent");
                 handles.push(tokio::spawn(async move {
-                    if let Err(e) = agent.run(rx).await {
+                    if let Err(e) = agent.run(rx, tx_clone).await {
                         tracing::error!(agent=%name, error=%e, "agent exited with error");
                     } else {
                         tracing::info!(agent=%name, "agent exited");
@@ -42,7 +94,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             }
             None => {
                 eprintln!("Unknown agent spec: {spec}");
-                for a in available_agents() { eprintln!("  - {a}"); }
+                for a in available_agents() {
+                    eprintln!("  - {a}");
+                }
                 std::process::exit(2);
             }
         }
@@ -59,6 +113,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             tracing::info!("all agents finished");
         }
     }
+
+    drop(tx);
+    let _ = canon_child.wait().await;
 
     Ok(())
 }

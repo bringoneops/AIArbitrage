@@ -1,4 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
+use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use crate::agent::Agent;
@@ -17,11 +18,7 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Erro
     let arr = products.as_array().ok_or("unexpected response")?;
     let mut symbols = Vec::new();
     for prod in arr {
-        if prod
-            .get("quote_currency")
-            .and_then(|q| q.as_str())
-            == Some("USD")
-        {
+        if prod.get("quote_currency").and_then(|q| q.as_str()) == Some("USD") {
             if let Some(id) = prod.get("id").and_then(|i| i.as_str()) {
                 symbols.push(id.to_string());
             }
@@ -53,8 +50,15 @@ impl Agent for CoinbaseAgent {
     async fn run(
         &mut self,
         shutdown: tokio::sync::watch::Receiver<bool>,
+        tx: mpsc::Sender<String>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        connection_task(self.symbols.clone(), shutdown, self.max_reconnect_delay_secs).await;
+        connection_task(
+            self.symbols.clone(),
+            shutdown,
+            tx,
+            self.max_reconnect_delay_secs,
+        )
+        .await;
         Ok(())
     }
 }
@@ -62,6 +66,7 @@ impl Agent for CoinbaseAgent {
 async fn connection_task(
     symbols: Vec<String>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
+    tx: mpsc::Sender<String>,
     max_reconnect_delay_secs: u64,
 ) {
     let mut attempt: u32 = 0;
@@ -101,7 +106,10 @@ async fn connection_task(
                                             let price = v.get("price").and_then(|p| p.as_str()).unwrap_or("?");
                                             let size = v.get("size").and_then(|q| q.as_str()).unwrap_or("?");
                                             let time = v.get("time").and_then(|t| t.as_str()).unwrap_or("?");
-                                            println!(r#"{{"agent":"coinbase","type":"trade","s":"{}","p":"{}","q":"{}","ts":"{}"}}"#, sym, price, size, time);
+                                            let line = format!(r#"{{"agent":"coinbase","type":"trade","s":"{}","p":"{}","q":"{}","ts":"{}"}}"#, sym, price, size, time);
+                                            if tx.send(line).await.is_err() {
+                                                break;
+                                            }
                                         }
                                     } else {
                                         tracing::warn!("non-json text msg");
