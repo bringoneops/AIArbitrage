@@ -4,6 +4,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, Web
 
 use crate::agent::Agent;
 use canonicalizer::CanonicalService;
+use serde_json::Value;
 
 const WS_URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
@@ -105,6 +106,7 @@ async fn connection_task(
                                         if typ == "match" {
                                             let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
                                             let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                            // Missing or non-positive trade IDs are represented as JSON null.
                                             let trade_id = v
                                                 .get("trade_id")
                                                 .and_then(|id| id.as_i64())
@@ -121,6 +123,11 @@ async fn connection_task(
                                                 .and_then(|q| q.parse::<f64>().ok())
                                                 .map(|q| format!("{:.8}", q))
                                                 .unwrap_or_else(|| "?".to_string());
+                                                .filter(|id| *id > 0)
+                                                .map(Value::from)
+                                                .unwrap_or(Value::Null);
+                                            let price = v.get("price").and_then(|p| p.as_str()).unwrap_or("?");
+                                            let size = v.get("size").and_then(|q| q.as_str()).unwrap_or("?");
                                             let ts = v
                                                 .get("time")
                                                 .and_then(|t| t.as_str())
@@ -144,11 +151,9 @@ async fn connection_task(
                                         tracing::warn!("non-json text msg");
                                     }
                                 }
-                                Some(Ok(Message::Binary(_))) => { }
-                                Some(Ok(Message::Frame(_))) => { }
                                 Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; }
-                                Some(Ok(Message::Pong(_))) => { }
                                 Some(Ok(Message::Close(frame))) => { tracing::warn!(?frame, "server closed connection"); break; }
+                                Some(Ok(_)) => { }
                                 Some(Err(e)) => { tracing::error!(error=%e, "ws error"); break; }
                                 None => { tracing::warn!("stream ended"); break; }
                             }
