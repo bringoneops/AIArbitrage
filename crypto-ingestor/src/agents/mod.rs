@@ -1,12 +1,11 @@
 pub mod binance;
 pub mod coinbase;
 
-use crate::{agent::Agent, config::Settings};
+use crate::{agent::Agent, config::Settings, error::IngestorError};
 use canonicalizer::CanonicalService;
 use std::collections::HashMap;
 
-async fn shared_symbols(
-) -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error + Send + Sync>> {
+async fn shared_symbols() -> Result<(Vec<String>, Vec<String>), IngestorError> {
     // Ensure that the canonicalizer has loaded the quote asset list before we
     // attempt any symbol comparisons.
     CanonicalService::init().await;

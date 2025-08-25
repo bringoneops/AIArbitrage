@@ -3,21 +3,37 @@ use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::{agent::Agent, config::Settings, http_client};
+use crate::{agent::Agent, config::Settings, error::IngestorError, http_client};
 use canonicalizer::CanonicalService;
 
 
 /// Fetch all tradable USD product IDs from Coinbase.
-pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let client = http_client::builder().build()?;
+pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
+    let client = http_client::builder().build().map_err(|e| IngestorError::Http {
+        source: e,
+        exchange: "coinbase",
+        symbol: None,
+    })?;
     let products: serde_json::Value = client
         .get("https://api.exchange.coinbase.com/products")
         .send()
-        .await?
+        .await
+        .map_err(|e| IngestorError::Http {
+            source: e,
+            exchange: "coinbase",
+            symbol: None,
+        })?
         .json()
-        .await?;
+        .await
+        .map_err(|e| IngestorError::Http {
+            source: e,
+            exchange: "coinbase",
+            symbol: None,
+        })?;
 
-    let arr = products.as_array().ok_or("unexpected response")?;
+    let arr = products
+        .as_array()
+        .ok_or_else(|| IngestorError::Other("coinbase unexpected response".into()))?;
     let mut symbols = Vec::new();
     for prod in arr {
         if prod.get("quote_currency").and_then(|q| q.as_str()) == Some("USD") {
@@ -61,7 +77,7 @@ impl Agent for CoinbaseAgent {
         &mut self,
         shutdown: tokio::sync::watch::Receiver<bool>,
         tx: mpsc::Sender<String>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(), IngestorError> {
         connection_task(
             self.symbols.clone(),
             shutdown,
