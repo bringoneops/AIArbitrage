@@ -26,7 +26,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut handles = Vec::new();
     for spec in specs.drain(..) {
-        match make_agent(&spec) {
+        match make_agent(&spec).await {
             Some(mut agent) => {
                 let rx = shutdown_rx.clone(); // no need for `mut`
                 let name = agent.name();
