@@ -1,5 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
 use std::collections::HashSet;
+use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use crate::agent::Agent;
@@ -65,6 +66,7 @@ impl Agent for BinanceAgent {
     async fn run(
         &mut self,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
+        out_tx: mpsc::Sender<String>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         let mut handles = Vec::new();
         let mut symbol_txs = Vec::new();
@@ -76,12 +78,13 @@ impl Agent for BinanceAgent {
             .collect::<Vec<_>>();
 
         for chunk in chunks {
-            let (tx, rx) = tokio::sync::watch::channel(chunk);
-            symbol_txs.push(tx);
+            let (sym_tx, rx) = tokio::sync::watch::channel(chunk);
+            symbol_txs.push(sym_tx);
             let shutdown_rx = shutdown.clone();
             let max_delay = self.max_reconnect_delay_secs;
+            let tx_clone = out_tx.clone();
             handles.push(tokio::spawn(async move {
-                connection_task(rx, shutdown_rx, max_delay).await;
+                connection_task(rx, shutdown_rx, tx_clone, max_delay).await;
             }));
         }
 
@@ -124,12 +127,13 @@ impl Agent for BinanceAgent {
                                         let _ = tx.send(chunk.clone());
                                     }
                                     for chunk in new_chunks.iter().skip(symbol_txs.len()) {
-                                        let (tx, rx) = tokio::sync::watch::channel(chunk.clone());
-                                        symbol_txs.push(tx);
+                                        let (sym_tx, rx) = tokio::sync::watch::channel(chunk.clone());
+                                        symbol_txs.push(sym_tx);
                                         let shutdown_rx = shutdown.clone();
+                                        let tx_conn = out_tx.clone();
                                         let max_delay = self.max_reconnect_delay_secs;
                                         handles.push(tokio::spawn(async move {
-                                            connection_task(rx, shutdown_rx, max_delay).await;
+                                            connection_task(rx, shutdown_rx, tx_conn, max_delay).await;
                                         }));
                                     }
                                 } else {
@@ -165,6 +169,7 @@ impl Agent for BinanceAgent {
 async fn connection_task(
     mut symbols_rx: tokio::sync::watch::Receiver<Vec<String>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
+    tx: mpsc::Sender<String>,
     max_reconnect_delay_secs: u64,
 ) {
     let mut attempt: u32 = 0;
@@ -238,7 +243,10 @@ async fn connection_task(
                                         let px = v.get("p").and_then(|p| p.as_str()).unwrap_or("?");
                                         let qty = v.get("q").and_then(|q| q.as_str()).unwrap_or("?");
                                         let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
-                                        println!(r#"{{"agent":"binance","type":"trade","s":"{}","t":{},"p":"{}","q":"{}","ts":{}}}"#, sym, trade_id, px, qty, ts);
+                                        let line = format!(r#"{{"agent":"binance","type":"trade","s":"{}","t":{},"p":"{}","q":"{}","ts":{}}}"#, sym, trade_id, px, qty, ts);
+                                        if tx.send(line).await.is_err() {
+                                            break;
+                                        }
                                     } else {
                                         tracing::warn!("non-json text msg");
                                     }
