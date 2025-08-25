@@ -270,11 +270,9 @@ async fn connection_task(
                                         tracing::warn!("non-json text msg");
                                     }
                                 }
-                                Some(Ok(Message::Binary(_))) => { }
-                                Some(Ok(Message::Frame(_))) => { }
                                 Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; }
-                                Some(Ok(Message::Pong(_))) => { }
                                 Some(Ok(Message::Close(frame))) => { tracing::warn!(?frame, "server closed connection"); break; }
+                                Some(Ok(_)) => { }
                                 Some(Err(e)) => { tracing::error!(error=%e, "ws error"); break; }
                                 None => { tracing::warn!("stream ended"); break; }
                             }
