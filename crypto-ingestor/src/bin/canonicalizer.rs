@@ -7,6 +7,8 @@ use canonical::CanonicalService;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {
+    CanonicalService::init().await;
+
     let stdin = io::BufReader::new(io::stdin());
     let mut lines = stdin.lines();
     let mut stdout = io::stdout();

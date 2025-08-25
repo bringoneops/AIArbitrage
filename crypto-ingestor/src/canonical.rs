@@ -7,9 +7,47 @@
 ///
 /// Additional exchanges can be supported by extending `canonical_pair`.
 
+use std::collections::HashSet;
+use std::sync::OnceLock;
+
+use tracing::warn;
+
 pub struct CanonicalService;
 
+/// Cached list of Binance quote assets. Populated at startup via [`init`].
+static BINANCE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
+
 impl CanonicalService {
+    /// Initialise any resources required by the service. Currently this loads
+    /// the list of Binance quote assets from the public `exchangeInfo` endpoint
+    /// (unless provided via the `BINANCE_QUOTES` environment variable).
+    ///
+    /// Network errors are logged and fall back to a small built-in list.
+    pub async fn init() {
+        if BINANCE_QUOTES.get().is_some() {
+            return;
+        }
+
+        if let Ok(env) = std::env::var("BINANCE_QUOTES") {
+            let quotes = Self::parse_env_quotes(&env);
+            let _ = BINANCE_QUOTES.set(quotes);
+            return;
+        }
+
+        match Self::fetch_binance_quotes().await {
+            Ok(quotes) if !quotes.is_empty() => {
+                let _ = BINANCE_QUOTES.set(quotes);
+            }
+            Ok(_) => {
+                let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
+            }
+            Err(e) => {
+                warn!("failed to fetch Binance quotes: {}", e);
+                let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
+            }
+        }
+    }
+
     /// Convert `pair` as used by `exchange` into the canonical `BASE-QUOTE`
     /// representation. Returns `None` if the exchange is unknown or the pair
     /// cannot be parsed.
@@ -21,11 +59,50 @@ impl CanonicalService {
         }
     }
 
+    fn binance_quotes() -> &'static Vec<String> {
+        BINANCE_QUOTES.get_or_init(Self::default_binance_quotes)
+    }
+
+    async fn fetch_binance_quotes() -> Result<Vec<String>, reqwest::Error> {
+        let v: serde_json::Value = reqwest::Client::new()
+            .get("https://api.binance.us/api/v3/exchangeInfo")
+            .send()
+            .await?
+            .json()
+            .await?;
+        let mut set = HashSet::new();
+        if let Some(symbols) = v.get("symbols").and_then(|s| s.as_array()) {
+            for sym in symbols {
+                if let Some(q) = sym.get("quoteAsset").and_then(|q| q.as_str()) {
+                    set.insert(q.to_lowercase());
+                }
+            }
+        }
+        let mut quotes: Vec<String> = set.into_iter().collect();
+        quotes.sort_by(|a, b| b.len().cmp(&a.len()));
+        Ok(quotes)
+    }
+
+    fn parse_env_quotes(env: &str) -> Vec<String> {
+        let mut quotes: Vec<String> = env
+            .split(',')
+            .map(|s| s.trim().to_lowercase())
+            .filter(|s| !s.is_empty())
+            .collect();
+        quotes.sort_by(|a, b| b.len().cmp(&a.len()));
+        quotes
+    }
+
+    fn default_binance_quotes() -> Vec<String> {
+        const DEFAULT: [&str; 7] = ["usdt", "usdc", "busd", "usd", "btc", "eth", "bnb"];
+        let mut quotes: Vec<String> = DEFAULT.iter().map(|q| q.to_string()).collect();
+        quotes.sort_by(|a, b| b.len().cmp(&a.len()));
+        quotes
+    }
+
     fn canonicalize_binance(symbol: &str) -> Option<String> {
         let lower = symbol.to_lowercase();
-        // Common quote assets on Binance US.
-        const QUOTES: [&str; 7] = ["usdt", "usdc", "busd", "usd", "btc", "eth", "bnb"];
-        for q in QUOTES {
+        for q in Self::binance_quotes() {
             if lower.ends_with(q) {
                 let base = &lower[..lower.len() - q.len()];
                 if base.is_empty() {
@@ -57,14 +134,30 @@ impl CanonicalService {
 
         lower.to_uppercase()
     }
+
+    #[cfg(test)]
+    pub fn set_binance_quotes(quotes: Vec<&str>) {
+        let mut qs: Vec<String> = quotes.into_iter().map(|s| s.to_lowercase()).collect();
+        qs.sort_by(|a, b| b.len().cmp(&a.len()));
+        let _ = BINANCE_QUOTES.set(qs);
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::CanonicalService;
+    use std::sync::Once;
+
+    fn setup() {
+        static INIT: Once = Once::new();
+        INIT.call_once(|| {
+            CanonicalService::set_binance_quotes(vec!["usdt", "btc", "eth"]);
+        });
+    }
 
     #[test]
     fn binance_pairs_are_canonicalized() {
+        setup();
         assert_eq!(
             CanonicalService::canonical_pair("binance", "btcusdt"),
             Some("BTC-USDT".to_string())
@@ -72,6 +165,10 @@ mod tests {
         assert_eq!(
             CanonicalService::canonical_pair("binance", "ethbtc"),
             Some("ETH-BTC".to_string())
+        );
+        assert_eq!(
+            CanonicalService::canonical_pair("binance", "bnbeth"),
+            Some("BNB-ETH".to_string())
         );
     }
 
