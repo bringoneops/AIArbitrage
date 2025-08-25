@@ -110,6 +110,19 @@ async fn connection_task(
                                             let trade_id = v
                                                 .get("trade_id")
                                                 .and_then(|id| id.as_i64())
+                                                .filter(|id| *id > 0);
+                                            let price = v
+                                                .get("price")
+                                                .and_then(|p| p.as_str())
+                                                .and_then(|p| p.parse::<f64>().ok())
+                                                .map(|p| format!("{:.8}", p))
+                                                .unwrap_or_else(|| "?".to_string());
+                                            let size = v
+                                                .get("size")
+                                                .and_then(|q| q.as_str())
+                                                .and_then(|q| q.parse::<f64>().ok())
+                                                .map(|q| format!("{:.8}", q))
+                                                .unwrap_or_else(|| "?".to_string());
                                                 .filter(|id| *id > 0)
                                                 .map(Value::from)
                                                 .unwrap_or(Value::Null);
