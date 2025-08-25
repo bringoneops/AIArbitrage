@@ -1,4 +1,4 @@
-use futures_util::{StreamExt, SinkExt}; // <-- add SinkExt
+use futures_util::{SinkExt, StreamExt}; // <-- add SinkExt
 use tokio_tungstenite::tungstenite::Message;
 
 use crate::agent::Agent;
@@ -10,12 +10,16 @@ pub struct BinanceAgent {
 
 impl BinanceAgent {
     pub fn new(symbols: Vec<String>) -> Self {
-        Self { symbols, max_reconnect_delay_secs: 30 }
+        Self {
+            symbols,
+            max_reconnect_delay_secs: 30,
+        }
     }
 
     fn build_ws_url(&self) -> String {
         // Combined stream: wss://stream.binance.com:9443/stream?streams=btcusdt@trade/ethusdt@trade
-        let streams = self.symbols
+        let streams = self
+            .symbols
             .iter()
             .map(|s| format!("{}@trade", s))
             .collect::<Vec<_>>()
@@ -26,7 +30,9 @@ impl BinanceAgent {
 
 #[async_trait::async_trait]
 impl Agent for BinanceAgent {
-    fn name(&self) -> &'static str { "binance" }
+    fn name(&self) -> &'static str {
+        "binance"
+    }
 
     async fn run(
         &mut self,
@@ -35,7 +41,9 @@ impl Agent for BinanceAgent {
         let mut attempt: u32 = 0;
 
         loop {
-            if *shutdown.borrow() { break; }
+            if *shutdown.borrow() {
+                break;
+            }
 
             let url = self.build_ws_url();
             tracing::info!(%url, "connecting");
@@ -71,6 +79,7 @@ impl Agent for BinanceAgent {
                                         }
                                     }
                                     Some(Ok(Message::Binary(_))) => { /* ignore */ }
+                                    Some(Ok(Message::Frame(_))) => { /* ignore */ }
                                     Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; } // <-- works now
                                     Some(Ok(Message::Pong(_))) => { /* ignore */ }
                                     Some(Ok(Message::Close(frame))) => { tracing::warn!(?frame, "server closed connection"); break; }
