@@ -35,7 +35,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let canon_path = exe.with_file_name("canonicalizer");
     if !canon_path.exists() {
         let mut build = Command::new("cargo");
-        build.arg("build").arg("--bin").arg("canonicalizer");
+        build
+            .arg("build")
+            .arg("-p")
+            .arg("canonicalizer")
+            .arg("--bin")
+            .arg("canonicalizer");
         if !cfg!(debug_assertions) {
             build.arg("--release");
         }

@@ -11,7 +11,10 @@ const WS_URL: &str = "wss://stream.binance.us:9443/ws";
 
 /// Fetch all tradable symbols from Binance US REST API.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let resp: serde_json::Value = reqwest::Client::new()
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()?;
+    let resp: serde_json::Value = client
         .get("https://api.binance.us/api/v3/exchangeInfo")
         .send()
         .await?
