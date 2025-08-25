@@ -25,6 +25,7 @@ clap = { version = "4", features = ["derive"] }
 config = "0.13"
 
 rust_decimal = "1"
+metrics = "0.21"
 
 [profile.release]
 opt-level = 3
