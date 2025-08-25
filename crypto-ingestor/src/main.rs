@@ -2,6 +2,7 @@ mod agent;
 mod agents;
 mod config;
 mod http_client;
+mod metrics;
 
 use agents::{available_agents, make_agent};
 use canonicalizer::CanonicalService;
@@ -33,6 +34,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         std::process::exit(2);
     }
     let settings = Settings::load(&cli)?;
+
+    // metrics server
+    tokio::spawn(metrics::serve(([0, 0, 0, 0], 9898).into()));
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
