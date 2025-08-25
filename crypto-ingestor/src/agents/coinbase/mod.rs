@@ -104,7 +104,10 @@ async fn connection_task(
                                         if typ == "match" {
                                             let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
                                             let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
-                                            let trade_id = v.get("trade_id").and_then(|id| id.as_i64());
+                                            let trade_id = v
+                                                .get("trade_id")
+                                                .and_then(|id| id.as_i64())
+                                                .filter(|id| *id > 0);
                                             let price = v.get("price").and_then(|p| p.as_str()).unwrap_or("?");
                                             let size = v.get("size").and_then(|q| q.as_str()).unwrap_or("?");
                                             let ts = v
