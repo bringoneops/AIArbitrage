@@ -4,8 +4,13 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use crate::{agent::Agent, config::Settings, error::IngestorError, http_client};
+use crate::{
+    agent::Agent,
+    config::Settings,
+    http_client,
+    metrics::{ERRORS, RECONNECTS, TRADES_RECEIVED},
+};
 use canonicalizer::CanonicalService;
-
 
 /// Fetch all tradable USD product IDs from Coinbase.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
@@ -112,6 +117,7 @@ async fn connection_task(
 
                 if let Err(e) = send_subscribe(&mut ws, &symbols).await {
                     tracing::error!(error=%e, "failed to send subscription");
+                    ERRORS.with_label_values(&["coinbase"]).inc();
                     continue;
                 }
 
@@ -162,7 +168,9 @@ async fn connection_task(
                                                 "q": size,
                                                 "ts": ts
                                             }).to_string();
-                                            if tx.send(line).await.is_err() {
+                                            if tx.send(line).await.is_ok() {
+                                                TRADES_RECEIVED.with_label_values(&["coinbase"]).inc();
+                                            } else {
                                                 break;
                                             }
                                         }
@@ -173,7 +181,7 @@ async fn connection_task(
                                 Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; }
                                 Some(Ok(Message::Close(frame))) => { tracing::warn!(?frame, "server closed connection"); break; }
                                 Some(Ok(_)) => { }
-                                Some(Err(e)) => { tracing::error!(error=%e, "ws error"); break; }
+                                Some(Err(e)) => { tracing::error!(error=%e, "ws error"); ERRORS.with_label_values(&["coinbase"]).inc(); break; }
                                 None => { tracing::warn!("stream ended"); break; }
                             }
                         }
@@ -182,6 +190,7 @@ async fn connection_task(
             }
             Err(e) => {
                 tracing::error!(error=%e, "connect failed");
+                ERRORS.with_label_values(&["coinbase"]).inc();
             }
         }
 
@@ -190,6 +199,7 @@ async fn connection_task(
         let delay = (1u64 << exp).min(max_reconnect_delay_secs);
         let sleep = std::time::Duration::from_secs(delay);
 
+        RECONNECTS.with_label_values(&["coinbase"]).inc();
         tracing::info!(?sleep, "reconnecting");
         tokio::select! {
             _ = tokio::time::sleep(sleep) => {},

@@ -19,8 +19,10 @@ This repository is organised as a Cargo workspace containing two crates:
 The `canonicalizer` crate provides both the `CanonicalService` library and a
 `canonicalizer` binary that normalizes symbols across exchanges. The binary
 reads trade messages as JSON lines on `STDIN`, converts the `s` field to the
-canonical `BASE-QUOTE` form using `canonicalizer::CanonicalService`, and emits
-the modified JSON on `STDOUT`.
+canonical `BASE-QUOTE` form using `canonicalizer::CanonicalService`, and by
+default prints the `agent`, `s`, `p`, and `q` fields in aligned tab-separated
+columns for easy reading. Use the `--json` flag to emit the modified JSON
+records, preserving the previous behaviour.
 
 The ingestor spawns this canonicalizer automatically so all output is already
 canonicalized:
@@ -39,6 +41,26 @@ To run the canonicalizer service on its own:
 
 ```bash
 cargo run -p canonicalizer
+```
+
+Example using the default column output:
+
+```bash
+echo '{"agent":"binance","s":"btcusdt","p":"30000.00","q":"0.01"}' | cargo run -p canonicalizer
+```
+
+```
+binance  BTC-USDT  30000.00  0.01
+```
+
+For raw JSON suitable for scripting, pass `--json`:
+
+```bash
+echo '{"agent":"binance","s":"btcusdt","p":"30000.00","q":"0.01"}' | cargo run -p canonicalizer -- --json
+```
+
+```
+{"agent":"binance","s":"BTC-USDT","p":"30000.00","q":"0.01"}
 ```
 
 ## Trade format

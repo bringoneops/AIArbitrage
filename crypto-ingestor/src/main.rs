@@ -3,6 +3,7 @@ mod agents;
 mod config;
 mod error;
 mod http_client;
+mod metrics;
 
 use agents::{available_agents, make_agent};
 use error::IngestorError;
@@ -36,6 +37,9 @@ async fn main() -> Result<(), IngestorError> {
     }
     let settings = Settings::load(&cli)?;
 
+    // metrics server
+    tokio::spawn(metrics::serve(([0, 0, 0, 0], 9898).into()));
+
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     // spawn canonicalizer process
@@ -57,36 +61,66 @@ async fn main() -> Result<(), IngestorError> {
             return Err(IngestorError::Other("failed to build canonicalizer".into()));
         }
     }
-    let mut canon_child = Command::new(&canon_path)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()?;
+    let (tx, rx) = mpsc::channel::<String>(100);
 
-    let canon_stdin = canon_child.stdin.take().expect("canonicalizer stdin");
-    let canon_stdout = canon_child.stdout.take().expect("canonicalizer stdout");
+    // spawn watchdog for canonicalizer process
+    let canon_path_clone = canon_path.clone();
+    let canon_watchdog = tokio::spawn(async move {
+        let mut rx = rx;
+        loop {
+            let mut canon_child = match Command::new(&canon_path_clone)
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .spawn()
+            {
+                Ok(child) => child,
+                Err(e) => {
+                    tracing::error!(error=%e, "failed to spawn canonicalizer");
+                    return;
+                }
+            };
 
-    let (tx, mut rx) = mpsc::channel::<String>(100);
+            let mut canon_stdin = canon_child.stdin.take().expect("canonicalizer stdin");
+            let canon_stdout = canon_child.stdout.take().expect("canonicalizer stdout");
+            let mut reader = tokio::io::BufReader::new(canon_stdout).lines();
+            let mut out = tokio::io::stdout();
 
-    // writer task
-    tokio::spawn(async move {
-        let mut stdin = canon_stdin;
-        while let Some(line) = rx.recv().await {
-            if stdin.write_all(line.as_bytes()).await.is_err() {
-                break;
+            loop {
+                tokio::select! {
+                    line = rx.recv() => {
+                        match line {
+                            Some(line) => {
+                                if canon_stdin.write_all(line.as_bytes()).await.is_err() {
+                                    break;
+                                }
+                                if canon_stdin.write_all(b"\n").await.is_err() {
+                                    break;
+                                }
+                            }
+                            None => {
+                                let _ = canon_child.kill().await;
+                                return;
+                            }
+                        }
+                    }
+                    res = reader.next_line() => {
+                        match res {
+                            Ok(Some(line)) => {
+                                let _ = out.write_all(line.as_bytes()).await;
+                                let _ = out.write_all(b"\n").await;
+                            }
+                            _ => break,
+                        }
+                    }
+                    status = canon_child.wait() => {
+                        tracing::warn!(?status, "canonicalizer exited; restarting");
+                        metrics::counter!("canonicalizer_restarts", 1);
+                        break;
+                    }
+                }
             }
-            if stdin.write_all(b"\n").await.is_err() {
-                break;
-            }
-        }
-    });
 
-    // reader task
-    tokio::spawn(async move {
-        let mut reader = tokio::io::BufReader::new(canon_stdout).lines();
-        let mut out = tokio::io::stdout();
-        while let Ok(Some(line)) = reader.next_line().await {
-            let _ = out.write_all(line.as_bytes()).await;
-            let _ = out.write_all(b"\n").await;
+            let _ = canon_child.kill().await;
         }
     });
 
@@ -133,7 +167,7 @@ async fn main() -> Result<(), IngestorError> {
     }
 
     drop(tx);
-    let _ = canon_child.wait().await;
+    let _ = canon_watchdog.await;
 
     Ok(())
 }
