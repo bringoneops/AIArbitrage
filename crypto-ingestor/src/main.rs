@@ -2,6 +2,7 @@ mod agent;
 mod agents;
 
 use agents::{available_agents, make_agent};
+use canonical::CanonicalService;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -75,6 +76,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
             let _ = out.write_all(b"\n").await;
         }
     });
+
+    // Initialise the canonical service before any agents are created so that
+    // the required quote asset list is available for symbol comparisons.
+    CanonicalService::init().await;
 
     let mut handles = Vec::new();
     for spec in specs.drain(..) {
