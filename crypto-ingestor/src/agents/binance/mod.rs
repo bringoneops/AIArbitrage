@@ -5,7 +5,6 @@ use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, Web
 
 use crate::agent::Agent;
 use canonicalizer::CanonicalService;
-use serde_json::Value;
 
 const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
 const WS_URL: &str = "wss://stream.binance.us:9443/ws";
@@ -265,11 +264,6 @@ async fn connection_task(
                                             .and_then(|q| q.parse::<f64>().ok())
                                             .map(|q| format!("{:.8}", q))
                                             .unwrap_or_else(|| "?".to_string());
-                                            .filter(|id| *id > 0)
-                                            .map(Value::from)
-                                            .unwrap_or(Value::Null);
-                                        let px = v.get("p").and_then(|p| p.as_str()).unwrap_or("?");
-                                        let qty = v.get("q").and_then(|q| q.as_str()).unwrap_or("?");
                                         let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
                                         let line = serde_json::json!({
                                             "agent": "binance",
