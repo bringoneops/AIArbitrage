@@ -35,6 +35,14 @@ pub async fn make_agent(spec: &str) -> Option<Box<dyn Agent>> {
         "coinbase" => {
             let symbols = if args.is_empty() {
                 vec!["BTC-USD".to_string()]
+            } else if args.eq_ignore_ascii_case("all") {
+                match coinbase::fetch_all_symbols().await {
+                    Ok(syms) => syms,
+                    Err(e) => {
+                        tracing::error!(error=%e, "failed to fetch coinbase symbols");
+                        return None;
+                    }
+                }
             } else {
                 args.split(',')
                     .map(|s| s.trim().to_uppercase())
@@ -50,6 +58,6 @@ pub async fn make_agent(spec: &str) -> Option<Box<dyn Agent>> {
 pub fn available_agents() -> &'static [&'static str] {
     &[
         "binance:<csv symbols|all>  (e.g. binance:btcusdt,ethusdt)",
-        "coinbase:<csv pairs>      (e.g. coinbase:BTC-USD,ETH-USD)",
+        "coinbase:<csv pairs|all>   (e.g. coinbase:BTC-USD,ETH-USD)",
     ]
 }

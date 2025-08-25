@@ -1,5 +1,21 @@
 use crate::agent::Agent;
 
+/// Fetch all available currency pairs from Coinbase in the form `BASE-USD`.
+///
+/// This calls the public exchange rates endpoint and converts the returned
+/// currency codes into pairs against USD. Only the keys are used, so the
+/// response body is kept small.
+pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let resp = reqwest::get("https://api.coinbase.com/v2/exchange-rates?currency=USD").await?;
+    let json: serde_json::Value = resp.json().await?;
+    let rates = json
+        .get("data")
+        .and_then(|d| d.get("rates"))
+        .and_then(|r| r.as_object())
+        .ok_or("missing rates")?;
+    Ok(rates.keys().map(|k| format!("{k}-USD")).collect::<Vec<_>>())
+}
+
 pub struct CoinbaseAgent {
     symbols: Vec<String>,
     interval_secs: u64,
