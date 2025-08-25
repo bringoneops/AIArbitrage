@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::agent::Agent;
+use crate::{agent::Agent, http_client};
 use canonicalizer::CanonicalService;
 
 const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
@@ -11,9 +11,7 @@ const WS_URL: &str = "wss://stream.binance.us:9443/ws";
 
 /// Fetch all tradable symbols from Binance US REST API.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    let client = http_client::builder().build()?;
     let resp: serde_json::Value = client
         .get("https://api.binance.us/api/v3/exchangeInfo")
         .send()

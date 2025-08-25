@@ -1,5 +1,6 @@
 mod agent;
 mod agents;
+mod http_client;
 
 use agents::{available_agents, make_agent};
 use canonicalizer::CanonicalService;

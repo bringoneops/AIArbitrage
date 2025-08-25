@@ -2,16 +2,14 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::agent::Agent;
+use crate::{agent::Agent, http_client};
 use canonicalizer::CanonicalService;
 
 const WS_URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
 /// Fetch all tradable USD product IDs from Coinbase.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let client = reqwest::Client::builder()
-        .danger_accept_invalid_certs(true)
-        .build()?;
+    let client = http_client::builder().build()?;
     let products: serde_json::Value = client
         .get("https://api.exchange.coinbase.com/products")
         .send()
