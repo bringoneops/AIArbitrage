@@ -2,7 +2,7 @@ mod agent;
 mod agents;
 
 use agents::{available_agents, make_agent};
-use canonical::CanonicalService;
+use canonicalizer::CanonicalService;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
