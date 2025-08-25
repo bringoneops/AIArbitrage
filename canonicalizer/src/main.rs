@@ -1,9 +1,7 @@
 use serde_json::Value;
 use tokio::io::{self, AsyncBufReadExt, AsyncWriteExt};
 
-#[path = "../canonical.rs"]
-mod canonical;
-use canonical::CanonicalService;
+use canonicalizer::CanonicalService;
 
 #[tokio::main]
 async fn main() -> io::Result<()> {

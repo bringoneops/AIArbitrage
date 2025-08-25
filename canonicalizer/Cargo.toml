@@ -1,0 +1,17 @@
+[package]
+name = "canonicalizer"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "io-std", "io-util"] }
+reqwest = { version = "0.11", features = ["json", "rustls-tls"], default-features = false }
+serde_json = "1"
+tracing = "0.1"
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "canonicalizer"
+path = "src/main.rs"
