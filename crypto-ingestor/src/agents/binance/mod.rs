@@ -1,4 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
+use std::collections::HashSet;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use crate::agent::Agent;
@@ -35,6 +36,7 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Erro
 pub struct BinanceAgent {
     symbols: Vec<String>,
     max_reconnect_delay_secs: u64,
+    refresh_interval_mins: u64,
 }
 
 impl BinanceAgent {
@@ -49,6 +51,7 @@ impl BinanceAgent {
         Ok(Self {
             symbols,
             max_reconnect_delay_secs: 30,
+            refresh_interval_mins: 60,
         })
     }
 }
@@ -82,7 +85,9 @@ impl Agent for BinanceAgent {
             }));
         }
 
-        let mut refresh = tokio::time::interval(std::time::Duration::from_secs(60 * 60));
+        let mut refresh = tokio::time::interval(std::time::Duration::from_secs(
+            60 * self.refresh_interval_mins,
+        ));
         refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
 
         loop {
@@ -93,9 +98,19 @@ impl Agent for BinanceAgent {
                 _ = refresh.tick() => {
                     match fetch_all_symbols().await {
                         Ok(new_symbols) => {
-                            if new_symbols != self.symbols {
+                            let new_set: HashSet<_> = new_symbols.iter().cloned().collect();
+                            let old_set: HashSet<_> = self.symbols.iter().cloned().collect();
+                            let added: Vec<_> = new_set.difference(&old_set).cloned().collect();
+                            let removed: Vec<_> = old_set.difference(&new_set).cloned().collect();
+
+                            if added.is_empty() && removed.is_empty() {
+                                tracing::info!("symbol refresh: no changes");
+                            } else {
+                                tracing::info!(?added, ?removed, total=new_symbols.len(), "symbol refresh");
                                 self.symbols = new_symbols;
-                                let new_chunks = self.symbols
+
+                                let new_chunks = self
+                                    .symbols
                                     .chunks(MAX_STREAMS_PER_CONN)
                                     .map(|c| c.to_vec())
                                     .collect::<Vec<_>>();
@@ -104,22 +119,32 @@ impl Agent for BinanceAgent {
                                     for (tx, chunk) in symbol_txs.iter().zip(new_chunks.iter()) {
                                         let _ = tx.send(chunk.clone());
                                     }
-                                } else {
-                                    drop(symbol_txs);
-                                    for h in handles.drain(..) { let _ = h.await; }
-                                    let mut new_txs = Vec::new();
-                                    let mut new_handles = Vec::new();
-                                    for chunk in new_chunks {
-                                        let (tx, rx) = tokio::sync::watch::channel(chunk);
-                                        new_txs.push(tx);
+                                } else if new_chunks.len() > symbol_txs.len() {
+                                    for (tx, chunk) in symbol_txs.iter().zip(new_chunks.iter()) {
+                                        let _ = tx.send(chunk.clone());
+                                    }
+                                    for chunk in new_chunks.iter().skip(symbol_txs.len()) {
+                                        let (tx, rx) = tokio::sync::watch::channel(chunk.clone());
+                                        symbol_txs.push(tx);
                                         let shutdown_rx = shutdown.clone();
                                         let max_delay = self.max_reconnect_delay_secs;
-                                        new_handles.push(tokio::spawn(async move {
+                                        handles.push(tokio::spawn(async move {
                                             connection_task(rx, shutdown_rx, max_delay).await;
                                         }));
                                     }
-                                    symbol_txs = new_txs;
-                                    handles = new_handles;
+                                } else {
+                                    for (tx, chunk) in symbol_txs.iter().zip(new_chunks.iter()) {
+                                        let _ = tx.send(chunk.clone());
+                                    }
+                                    let extra_txs = symbol_txs.split_off(new_chunks.len());
+                                    let extra_handles = handles.split_off(new_chunks.len());
+                                    for tx in &extra_txs {
+                                        let _ = tx.send(Vec::new());
+                                    }
+                                    drop(extra_txs);
+                                    for h in extra_handles {
+                                        let _ = h.await;
+                                    }
                                 }
                             }
                         }
@@ -174,10 +199,19 @@ async fn connection_task(
                             if changed.is_ok() {
                                 let new_syms = symbols_rx.borrow().clone();
                                 if new_syms != current_symbols {
-                                    let _ = send_unsubscribe(&mut ws, &current_symbols).await;
-                                    if let Err(e) = send_subscribe(&mut ws, &new_syms).await {
-                                        tracing::error!(error=%e, "failed to update subscription");
-                                        break;
+                                    let new_set: HashSet<_> = new_syms.iter().cloned().collect();
+                                    let old_set: HashSet<_> = current_symbols.iter().cloned().collect();
+                                    let to_sub: Vec<_> = new_set.difference(&old_set).cloned().collect();
+                                    let to_unsub: Vec<_> = old_set.difference(&new_set).cloned().collect();
+
+                                    if !to_unsub.is_empty() {
+                                        let _ = send_unsubscribe(&mut ws, &to_unsub).await;
+                                    }
+                                    if !to_sub.is_empty() {
+                                        if let Err(e) = send_subscribe(&mut ws, &to_sub).await {
+                                            tracing::error!(error=%e, "failed to update subscription");
+                                            break;
+                                        }
                                     }
                                     current_symbols = new_syms;
                                 }
