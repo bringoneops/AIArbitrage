@@ -63,7 +63,10 @@ impl CanonicalService {
     }
 
     async fn fetch_binance_quotes() -> Result<Vec<String>, reqwest::Error> {
-        let v: serde_json::Value = reqwest::Client::new()
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()?;
+        let v: serde_json::Value = client
             .get("https://api.binance.us/api/v3/exchangeInfo")
             .send()
             .await?

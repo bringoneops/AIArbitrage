@@ -9,7 +9,10 @@ const WS_URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
 /// Fetch all tradable USD product IDs from Coinbase.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let products: serde_json::Value = reqwest::Client::new()
+    let client = reqwest::Client::builder()
+        .danger_accept_invalid_certs(true)
+        .build()?;
+    let products: serde_json::Value = client
         .get("https://api.exchange.coinbase.com/products")
         .send()
         .await?
