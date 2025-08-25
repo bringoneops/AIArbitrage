@@ -13,15 +13,15 @@ async fn shared_symbols() -> Result<(Vec<String>, Vec<String>), IngestorError> {
     let (binance_all, coinbase_all) =
         tokio::try_join!(binance::fetch_all_symbols(), coinbase::fetch_all_symbols())?;
 
-    let mut bmap = HashMap::new();
-    for s in binance_all {
+    let mut bmap: HashMap<String, String> = HashMap::new();
+    for s in binance_all.into_iter() {
         if let Some(c) = CanonicalService::canonical_pair("binance", &s) {
             bmap.insert(c, s);
         }
     }
 
-    let mut cmap = HashMap::new();
-    for s in coinbase_all {
+    let mut cmap: HashMap<String, String> = HashMap::new();
+    for s in coinbase_all.into_iter() {
         if let Some(c) = CanonicalService::canonical_pair("coinbase", &s) {
             cmap.insert(c, s);
         }
