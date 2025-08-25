@@ -251,8 +251,18 @@ async fn connection_task(
                                             .get("t")
                                             .and_then(|t| t.as_i64())
                                             .filter(|id| *id > 0);
-                                        let px = v.get("p").and_then(|p| p.as_str()).unwrap_or("?");
-                                        let qty = v.get("q").and_then(|q| q.as_str()).unwrap_or("?");
+                                        let px = v
+                                            .get("p")
+                                            .and_then(|p| p.as_str())
+                                            .and_then(|p| p.parse::<f64>().ok())
+                                            .map(|p| format!("{:.8}", p))
+                                            .unwrap_or_else(|| "?".to_string());
+                                        let qty = v
+                                            .get("q")
+                                            .and_then(|q| q.as_str())
+                                            .and_then(|q| q.parse::<f64>().ok())
+                                            .map(|q| format!("{:.8}", q))
+                                            .unwrap_or_else(|| "?".to_string());
                                         let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
                                         let line = serde_json::json!({
                                             "agent": "binance",
