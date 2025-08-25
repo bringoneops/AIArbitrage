@@ -3,17 +3,54 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::agent::Agent;
 
+/// Fetch all tradable symbols from Binance US REST API.
+pub async fn fetch_all_symbols(
+) -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
+    let resp: serde_json::Value = reqwest::Client::new()
+        .get("https://api.binance.us/api/v3/exchangeInfo")
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    let symbols = resp
+        .get("symbols")
+        .and_then(|s| s.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|s| s
+            .get("status")
+            .and_then(|st| st.as_str())
+            == Some("TRADING"))
+        .filter_map(|s| {
+            s.get("symbol")
+                .and_then(|sym| sym.as_str())
+                .map(|sym| sym.to_lowercase())
+        })
+        .collect();
+
+    Ok(symbols)
+}
+
 pub struct BinanceAgent {
     symbols: Vec<String>,
     max_reconnect_delay_secs: u64,
 }
 
 impl BinanceAgent {
-    pub fn new(symbols: Vec<String>) -> Self {
-        Self {
+    pub async fn new(
+        symbols: Option<Vec<String>>,
+    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+        let symbols = match symbols {
+            Some(v) => v,
+            None => fetch_all_symbols().await?,
+        };
+
+        Ok(Self {
             symbols,
             max_reconnect_delay_secs: 30,
-        }
+        })
     }
 
     fn build_ws_url(&self) -> String {
