@@ -1,7 +1,39 @@
 pub mod binance;
 pub mod coinbase;
 
-use crate::agent::Agent;
+use crate::{agent::Agent, canonical::CanonicalService};
+use std::collections::HashMap;
+
+async fn shared_symbols(
+) -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error + Send + Sync>> {
+    let (binance_all, coinbase_all) =
+        tokio::try_join!(binance::fetch_all_symbols(), coinbase::fetch_all_symbols())?;
+
+    let mut bmap = HashMap::new();
+    for s in binance_all {
+        if let Some(c) = CanonicalService::canonical_pair("binance", &s) {
+            bmap.insert(c, s);
+        }
+    }
+
+    let mut cmap = HashMap::new();
+    for s in coinbase_all {
+        if let Some(c) = CanonicalService::canonical_pair("coinbase", &s) {
+            cmap.insert(c, s);
+        }
+    }
+
+    let mut b_syms = Vec::new();
+    let mut c_syms = Vec::new();
+    for (canon, b) in bmap.iter() {
+        if let Some(c) = cmap.get(canon) {
+            b_syms.push(b.clone());
+            c_syms.push(c.clone());
+        }
+    }
+
+    Ok((b_syms, c_syms))
+}
 
 /// Factory: "<agent>:<comma-separated-args>"
 /// e.g., "binance:btcusdt,ethusdt" or "binance:all"
@@ -14,7 +46,13 @@ pub async fn make_agent(spec: &str) -> Option<Box<dyn Agent>> {
     match name.as_str() {
         "binance" => {
             let symbols = if args.is_empty() || args.eq_ignore_ascii_case("all") {
-                None
+                match shared_symbols().await {
+                    Ok((b, _)) => Some(b),
+                    Err(e) => {
+                        tracing::error!(error=%e, "failed to fetch shared symbols");
+                        return None;
+                    }
+                }
             } else {
                 Some(
                     args.split(',')
@@ -36,10 +74,10 @@ pub async fn make_agent(spec: &str) -> Option<Box<dyn Agent>> {
             let symbols = if args.is_empty() {
                 vec!["BTC-USD".to_string()]
             } else if args.eq_ignore_ascii_case("all") {
-                match coinbase::fetch_all_symbols().await {
-                    Ok(syms) => syms,
+                match shared_symbols().await {
+                    Ok((_, c)) => c,
                     Err(e) => {
-                        tracing::error!(error=%e, "failed to fetch coinbase symbols");
+                        tracing::error!(error=%e, "failed to fetch shared symbols");
                         return None;
                     }
                 }

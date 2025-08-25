@@ -28,3 +28,25 @@ Example pipeline sending canonicalized trades to another process:
 cargo run --release -- binance:btcusdt coinbase:BTC-USD | jq '.'
 ```
 
+## Trade format
+
+Each line emitted by an agent is a JSON object:
+
+```
+{"agent":"binance","type":"trade","s":"BTC-USD","t":12345,"p":"30000.00","q":"0.01","ts":1680000000000}
+```
+
+Fields:
+
+- `agent` – source exchange
+- `type` – currently always `trade`
+- `s` – canonical `BASE-QUOTE` symbol
+- `t` – trade identifier if available, otherwise `null`
+- `p` – price as a string
+- `q` – quantity as a string
+- `ts` – trade timestamp in milliseconds since Unix epoch
+
+When either `binance:all` or `coinbase:all` agents are used, both exchanges
+subscribe only to USD-quoted pairs common to both platforms so their symbol
+sets align.
+

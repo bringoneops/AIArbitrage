@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::agent::Agent;
+use crate::{agent::Agent, canonical::CanonicalService};
 
 const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
 const WS_URL: &str = "wss://stream.binance.us:9443/ws";
@@ -24,6 +24,12 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Erro
         .unwrap_or_default()
         .into_iter()
         .filter(|s| s.get("status").and_then(|st| st.as_str()) == Some("TRADING"))
+        .filter(|s| {
+            s.get("quoteAsset")
+                .and_then(|q| q.as_str())
+                .map(|q| q.eq_ignore_ascii_case("USD") || q.eq_ignore_ascii_case("USDT"))
+                .unwrap_or(false)
+        })
         .filter_map(|s| {
             s.get("symbol")
                 .and_then(|sym| sym.as_str())
@@ -238,12 +244,21 @@ async fn connection_task(
                                             continue;
                                         }
 
-                                        let sym = v.get("s").and_then(|s| s.as_str()).unwrap_or("?");
+                                        let raw = v.get("s").and_then(|s| s.as_str()).unwrap_or("?");
+                                        let sym = CanonicalService::canonical_pair("binance", raw).unwrap_or_else(|| raw.to_string());
                                         let trade_id = v.get("t").and_then(|t| t.as_i64()).unwrap_or_default();
                                         let px = v.get("p").and_then(|p| p.as_str()).unwrap_or("?");
                                         let qty = v.get("q").and_then(|q| q.as_str()).unwrap_or("?");
                                         let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
-                                        let line = format!(r#"{{"agent":"binance","type":"trade","s":"{}","t":{},"p":"{}","q":"{}","ts":{}}}"#, sym, trade_id, px, qty, ts);
+                                        let line = serde_json::json!({
+                                            "agent": "binance",
+                                            "type": "trade",
+                                            "s": sym,
+                                            "t": trade_id,
+                                            "p": px,
+                                            "q": qty,
+                                            "ts": ts
+                                        }).to_string();
                                         if tx.send(line).await.is_err() {
                                             break;
                                         }
