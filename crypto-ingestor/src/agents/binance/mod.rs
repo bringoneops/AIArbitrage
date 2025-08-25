@@ -54,14 +54,8 @@ impl BinanceAgent {
     }
 
     fn build_ws_url(&self) -> String {
-        // Combined stream: wss://stream.binance.us:9443/stream?streams=btcusdt@trade/ethusdt@trade
-        let streams = self
-            .symbols
-            .iter()
-            .map(|s| format!("{}@trade", s))
-            .collect::<Vec<_>>()
-            .join("/");
-        format!("wss://stream.binance.us:9443/stream?streams={}", streams)
+        // Base websocket endpoint; subscriptions are sent after connecting.
+        "wss://stream.binance.us:9443/ws".to_string()
     }
 }
 
@@ -90,6 +84,21 @@ impl Agent for BinanceAgent {
                     tracing::info!("connected");
                     attempt = 0;
 
+                    let params = self
+                        .symbols
+                        .iter()
+                        .map(|s| format!("{}@trade", s))
+                        .collect::<Vec<_>>();
+                    let sub_msg = serde_json::json!({
+                        "method": "SUBSCRIBE",
+                        "params": params,
+                        "id": 1,
+                    });
+                    if let Err(e) = ws.send(Message::Text(sub_msg.to_string())).await {
+                        tracing::error!(error=%e, "failed to send subscription");
+                        continue;
+                    }
+
                     loop {
                         tokio::select! {
                             _ = shutdown.changed() => {
@@ -102,14 +111,22 @@ impl Agent for BinanceAgent {
                             msg = ws.next() => {
                                 match msg {
                                     Some(Ok(Message::Text(txt))) => {
-                                        // Combined stream payload: {"stream":"btcusdt@trade","data":{...}}
                                         if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
-                                            let d = v.get("data").unwrap_or(&serde_json::Value::Null);
-                                            let sym = d.get("s").and_then(|s| s.as_str()).unwrap_or("?");
-                                            let trade_id = d.get("t").and_then(|t| t.as_i64()).unwrap_or_default();
-                                            let px = d.get("p").and_then(|p| p.as_str()).unwrap_or("?");
-                                            let qty = d.get("q").and_then(|q| q.as_str()).unwrap_or("?");
-                                            let ts = d.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
+                                            if v.get("id").and_then(|id| id.as_i64()) == Some(1) {
+                                                if let Some(err) = v.get("error") {
+                                                    tracing::error!(?err, "subscription error");
+                                                    break;
+                                                } else {
+                                                    tracing::info!("subscription acknowledged");
+                                                }
+                                                continue;
+                                            }
+
+                                            let sym = v.get("s").and_then(|s| s.as_str()).unwrap_or("?");
+                                            let trade_id = v.get("t").and_then(|t| t.as_i64()).unwrap_or_default();
+                                            let px = v.get("p").and_then(|p| p.as_str()).unwrap_or("?");
+                                            let qty = v.get("q").and_then(|q| q.as_str()).unwrap_or("?");
+                                            let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
                                             println!(r#"{{"agent":"binance","type":"trade","s":"{}","t":{},"p":"{}","q":"{}","ts":{}}}"#, sym, trade_id, px, qty, ts);
                                         } else {
                                             tracing::warn!("non-json text msg");
