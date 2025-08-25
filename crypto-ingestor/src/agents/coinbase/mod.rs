@@ -1,31 +1,45 @@
+use futures_util::{SinkExt, StreamExt};
+use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+
 use crate::agent::Agent;
 
-/// Fetch all available currency pairs from Coinbase in the form `BASE-USD`.
-///
-/// This calls the public exchange rates endpoint and converts the returned
-/// currency codes into pairs against USD. Only the keys are used, so the
-/// response body is kept small.
+const WS_URL: &str = "wss://ws-feed.exchange.coinbase.com";
+
+/// Fetch all tradable USD product IDs from Coinbase.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let resp = reqwest::get("https://api.coinbase.com/v2/exchange-rates?currency=USD").await?;
-    let json: serde_json::Value = resp.json().await?;
-    let rates = json
-        .get("data")
-        .and_then(|d| d.get("rates"))
-        .and_then(|r| r.as_object())
-        .ok_or("missing rates")?;
-    Ok(rates.keys().map(|k| format!("{k}-USD")).collect::<Vec<_>>())
+    let products: serde_json::Value = reqwest::Client::new()
+        .get("https://api.exchange.coinbase.com/products")
+        .send()
+        .await?
+        .json()
+        .await?;
+
+    let arr = products.as_array().ok_or("unexpected response")?;
+    let mut symbols = Vec::new();
+    for prod in arr {
+        if prod
+            .get("quote_currency")
+            .and_then(|q| q.as_str())
+            == Some("USD")
+        {
+            if let Some(id) = prod.get("id").and_then(|i| i.as_str()) {
+                symbols.push(id.to_string());
+            }
+        }
+    }
+    Ok(symbols)
 }
 
 pub struct CoinbaseAgent {
     symbols: Vec<String>,
-    interval_secs: u64,
+    max_reconnect_delay_secs: u64,
 }
 
 impl CoinbaseAgent {
     pub fn new(symbols: Vec<String>) -> Self {
         Self {
             symbols,
-            interval_secs: 5,
+            max_reconnect_delay_secs: 30,
         }
     }
 }
@@ -38,38 +52,104 @@ impl Agent for CoinbaseAgent {
 
     async fn run(
         &mut self,
-        mut shutdown: tokio::sync::watch::Receiver<bool>,
+        shutdown: tokio::sync::watch::Receiver<bool>,
     ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
-        let client = reqwest::Client::new();
-        let mut interval =
-            tokio::time::interval(std::time::Duration::from_secs(self.interval_secs));
-        loop {
-            tokio::select! {
-                _ = shutdown.changed() => {
-                    if *shutdown.borrow() { break; }
+        connection_task(self.symbols.clone(), shutdown, self.max_reconnect_delay_secs).await;
+        Ok(())
+    }
+}
+
+async fn connection_task(
+    symbols: Vec<String>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    max_reconnect_delay_secs: u64,
+) {
+    let mut attempt: u32 = 0;
+
+    loop {
+        if *shutdown.borrow() {
+            break;
+        }
+
+        tracing::info!(url = WS_URL, "connecting");
+        match connect_async(WS_URL).await {
+            Ok((mut ws, _)) => {
+                tracing::info!("connected");
+                attempt = 0;
+
+                if let Err(e) = send_subscribe(&mut ws, &symbols).await {
+                    tracing::error!(error=%e, "failed to send subscription");
+                    continue;
                 }
-                _ = interval.tick() => {
-                    for sym in &self.symbols {
-                        let url = format!("https://api.coinbase.com/v2/prices/{sym}/spot");
-                        match client.get(&url).send().await {
-                            Ok(resp) => {
-                                match resp.json::<serde_json::Value>().await {
-                                    Ok(val) => {
-                                        let price = val.get("data")
-                                            .and_then(|d| d.get("amount"))
-                                            .and_then(|a| a.as_str())
-                                            .unwrap_or("?");
-                                        tracing::info!(%sym, %price, "coinbase spot");
-                                    }
-                                    Err(e) => tracing::error!(%sym, error=%e, "parse error"),
-                                }
+
+                loop {
+                    tokio::select! {
+                        _ = shutdown.changed() => {
+                            if *shutdown.borrow() {
+                                tracing::info!("shutdown signal - closing connection");
+                                let _ = ws.close(None).await;
+                                return;
                             }
-                            Err(e) => tracing::error!(%sym, error=%e, "request error"),
+                        }
+                        msg = ws.next() => {
+                            match msg {
+                                Some(Ok(Message::Text(txt))) => {
+                                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
+                                        let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                        if typ == "match" || typ == "ticker" {
+                                            let sym = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                            let price = v.get("price").and_then(|p| p.as_str()).unwrap_or("?");
+                                            let size = v.get("size").and_then(|q| q.as_str()).unwrap_or("?");
+                                            let time = v.get("time").and_then(|t| t.as_str()).unwrap_or("?");
+                                            println!(r#"{{"agent":"coinbase","type":"trade","s":"{}","p":"{}","q":"{}","ts":"{}"}}"#, sym, price, size, time);
+                                        }
+                                    } else {
+                                        tracing::warn!("non-json text msg");
+                                    }
+                                }
+                                Some(Ok(Message::Binary(_))) => { }
+                                Some(Ok(Message::Frame(_))) => { }
+                                Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; }
+                                Some(Ok(Message::Pong(_))) => { }
+                                Some(Ok(Message::Close(frame))) => { tracing::warn!(?frame, "server closed connection"); break; }
+                                Some(Err(e)) => { tracing::error!(error=%e, "ws error"); break; }
+                                None => { tracing::warn!("stream ended"); break; }
+                            }
                         }
                     }
                 }
             }
+            Err(e) => {
+                tracing::error!(error=%e, "connect failed");
+            }
         }
-        Ok(())
+
+        attempt = attempt.saturating_add(1);
+        let exp: u32 = attempt.saturating_sub(1).min(4);
+        let delay = (1u64 << exp).min(max_reconnect_delay_secs);
+        let sleep = std::time::Duration::from_secs(delay);
+
+        tracing::info!(?sleep, "reconnecting");
+        tokio::select! {
+            _ = tokio::time::sleep(sleep) => {},
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    tracing::info!("shutdown during backoff");
+                    break;
+                }
+            }
+        }
     }
+}
+
+async fn send_subscribe(
+    ws: &mut WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    symbols: &[String],
+) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+    let msg = serde_json::json!({
+        "type": "subscribe",
+        "product_ids": symbols,
+        "channels": ["matches"],
+    });
+    ws.send(Message::Text(msg.to_string())).await
 }
