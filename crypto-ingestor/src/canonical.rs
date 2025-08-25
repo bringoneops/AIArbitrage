@@ -38,7 +38,24 @@ impl CanonicalService {
     }
 
     fn canonicalize_coinbase(symbol: &str) -> String {
-        symbol.to_uppercase()
+        let lower = symbol.to_lowercase().replace('_', "-");
+
+        if let Some((base, quote)) = lower.split_once('-') {
+            return format!("{}-{}", base.to_uppercase(), quote.to_uppercase());
+        }
+
+        // Attempt to detect a known quote asset when no separator is present.
+        const QUOTES: [&str; 6] = ["usdt", "usdc", "usd", "btc", "eth", "eur"];
+        for q in QUOTES {
+            if lower.ends_with(q) {
+                let base = &lower[..lower.len() - q.len()];
+                if !base.is_empty() {
+                    return format!("{}-{}", base.to_uppercase(), q.to_uppercase());
+                }
+            }
+        }
+
+        lower.to_uppercase()
     }
 }
 
@@ -68,6 +85,14 @@ mod tests {
             CanonicalService::canonical_pair("coinbase", "ETH-USD"),
             Some("ETH-USD".to_string())
         );
+        assert_eq!(
+            CanonicalService::canonical_pair("coinbase", "btc_usd"),
+            Some("BTC-USD".to_string())
+        );
+        assert_eq!(
+            CanonicalService::canonical_pair("coinbase", "btcusd"),
+            Some("BTC-USD".to_string())
+        );
     }
 
     #[test]
@@ -75,4 +100,3 @@ mod tests {
         assert_eq!(CanonicalService::canonical_pair("kraken", "btcusd"), None);
     }
 }
-
