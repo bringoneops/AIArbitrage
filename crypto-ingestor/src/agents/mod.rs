@@ -1,4 +1,5 @@
 pub mod binance;
+pub mod coinbase;
 
 use crate::agent::Agent;
 
@@ -31,10 +32,24 @@ pub async fn make_agent(spec: &str) -> Option<Box<dyn Agent>> {
                 }
             }
         }
+        "coinbase" => {
+            let symbols = if args.is_empty() {
+                vec!["BTC-USD".to_string()]
+            } else {
+                args.split(',')
+                    .map(|s| s.trim().to_uppercase())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>()
+            };
+            Some(Box::new(coinbase::CoinbaseAgent::new(symbols)))
+        }
         _ => None,
     }
 }
 
 pub fn available_agents() -> &'static [&'static str] {
-    &["binance:<csv symbols|all>  (e.g. binance:btcusdt,ethusdt)"]
+    &[
+        "binance:<csv symbols|all>  (e.g. binance:btcusdt,ethusdt)",
+        "coinbase:<csv pairs>      (e.g. coinbase:BTC-USD,ETH-USD)",
+    ]
 }
