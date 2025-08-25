@@ -2,6 +2,9 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
+use rust_decimal::Decimal;
+use std::str::FromStr;
+
 use crate::{agent::Agent, canonical::CanonicalService};
 
 const WS_URL: &str = "wss://ws-feed.exchange.coinbase.com";
@@ -105,8 +108,16 @@ async fn connection_task(
                                             let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
                                             let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
                                             let trade_id = v.get("trade_id").and_then(|id| id.as_i64());
-                                            let price = v.get("price").and_then(|p| p.as_str()).unwrap_or("?");
-                                            let size = v.get("size").and_then(|q| q.as_str()).unwrap_or("?");
+                                            let price_str = v.get("price").and_then(|p| p.as_str());
+                                            let price = price_str
+                                                .and_then(|s| Decimal::from_str(s).ok())
+                                                .map(|d| format!("{:.8}", d))
+                                                .unwrap_or_else(|| price_str.unwrap_or("?").to_string());
+                                            let size_str = v.get("size").and_then(|q| q.as_str());
+                                            let size = size_str
+                                                .and_then(|s| Decimal::from_str(s).ok())
+                                                .map(|d| format!("{:.8}", d))
+                                                .unwrap_or_else(|| size_str.unwrap_or("?").to_string());
                                             let ts = v
                                                 .get("time")
                                                 .and_then(|t| t.as_str())
