@@ -4,6 +4,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, Web
 
 use crate::agent::Agent;
 use canonicalizer::CanonicalService;
+use serde_json::Value;
 
 const WS_URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
@@ -105,10 +106,13 @@ async fn connection_task(
                                         if typ == "match" {
                                             let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
                                             let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                            // Missing or non-positive trade IDs are represented as JSON null.
                                             let trade_id = v
                                                 .get("trade_id")
                                                 .and_then(|id| id.as_i64())
-                                                .filter(|id| *id > 0);
+                                                .filter(|id| *id > 0)
+                                                .map(Value::from)
+                                                .unwrap_or(Value::Null);
                                             let price = v.get("price").and_then(|p| p.as_str()).unwrap_or("?");
                                             let size = v.get("size").and_then(|q| q.as_str()).unwrap_or("?");
                                             let ts = v
