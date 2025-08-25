@@ -4,11 +4,10 @@ use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::{agent::Agent, http_client};
+use crate::{agent::Agent, config::Settings, http_client};
 use canonicalizer::CanonicalService;
 
 const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
-const WS_URL: &str = "wss://stream.binance.us:9443/ws";
 
 /// Fetch all tradable symbols from Binance US REST API.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
@@ -45,6 +44,7 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Erro
 
 pub struct BinanceAgent {
     symbols: Vec<String>,
+    ws_url: String,
     max_reconnect_delay_secs: u64,
     refresh_interval_mins: u64,
 }
@@ -52,6 +52,7 @@ pub struct BinanceAgent {
 impl BinanceAgent {
     pub async fn new(
         symbols: Option<Vec<String>>,
+        cfg: &Settings,
     ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
         let symbols = match symbols {
             Some(v) => v,
@@ -60,8 +61,9 @@ impl BinanceAgent {
 
         Ok(Self {
             symbols,
-            max_reconnect_delay_secs: 30,
-            refresh_interval_mins: 60,
+            ws_url: cfg.binance_ws_url.clone(),
+            max_reconnect_delay_secs: cfg.binance_max_reconnect_delay_secs,
+            refresh_interval_mins: cfg.binance_refresh_interval_mins,
         })
     }
 }
@@ -91,9 +93,10 @@ impl Agent for BinanceAgent {
             symbol_txs.push(sym_tx);
             let shutdown_rx = shutdown.clone();
             let max_delay = self.max_reconnect_delay_secs;
+            let ws_url = self.ws_url.clone();
             let tx_clone = out_tx.clone();
             handles.push(tokio::spawn(async move {
-                connection_task(rx, shutdown_rx, tx_clone, max_delay).await;
+                connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
             }));
         }
 
@@ -141,8 +144,9 @@ impl Agent for BinanceAgent {
                                         let shutdown_rx = shutdown.clone();
                                         let tx_conn = out_tx.clone();
                                         let max_delay = self.max_reconnect_delay_secs;
+                                        let ws_url = self.ws_url.clone();
                                         handles.push(tokio::spawn(async move {
-                                            connection_task(rx, shutdown_rx, tx_conn, max_delay).await;
+                                            connection_task(rx, shutdown_rx, tx_conn, ws_url, max_delay).await;
                                         }));
                                     }
                                 } else {
@@ -179,6 +183,7 @@ async fn connection_task(
     mut symbols_rx: tokio::sync::watch::Receiver<Vec<String>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     tx: mpsc::Sender<String>,
+    ws_url: String,
     max_reconnect_delay_secs: u64,
 ) {
     let mut attempt: u32 = 0;
@@ -188,9 +193,9 @@ async fn connection_task(
             break;
         }
 
-        tracing::info!(url = WS_URL, "connecting");
+        tracing::info!(url = %ws_url, "connecting");
         let mut current_symbols = symbols_rx.borrow().clone();
-        match connect_async(WS_URL).await {
+        match connect_async(&ws_url).await {
             Ok((mut ws, _)) => {
                 tracing::info!("connected");
                 attempt = 0;

@@ -3,10 +3,9 @@ use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::{agent::Agent, http_client};
+use crate::{agent::Agent, config::Settings, http_client};
 use canonicalizer::CanonicalService;
 
-const WS_URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
 /// Fetch all tradable USD product IDs from Coinbase.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
@@ -32,14 +31,16 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Erro
 
 pub struct CoinbaseAgent {
     symbols: Vec<String>,
+    ws_url: String,
     max_reconnect_delay_secs: u64,
 }
 
 impl CoinbaseAgent {
-    pub fn new(symbols: Vec<String>) -> Self {
+    pub fn new(symbols: Vec<String>, cfg: &Settings) -> Self {
         Self {
             symbols,
-            max_reconnect_delay_secs: 30,
+            ws_url: cfg.coinbase_ws_url.clone(),
+            max_reconnect_delay_secs: cfg.coinbase_max_reconnect_delay_secs,
         }
     }
 }
@@ -59,6 +60,7 @@ impl Agent for CoinbaseAgent {
             self.symbols.clone(),
             shutdown,
             tx,
+            self.ws_url.clone(),
             self.max_reconnect_delay_secs,
         )
         .await;
@@ -70,6 +72,7 @@ async fn connection_task(
     symbols: Vec<String>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     tx: mpsc::Sender<String>,
+    ws_url: String,
     max_reconnect_delay_secs: u64,
 ) {
     let mut attempt: u32 = 0;
@@ -79,8 +82,8 @@ async fn connection_task(
             break;
         }
 
-        tracing::info!(url = WS_URL, "connecting");
-        match connect_async(WS_URL).await {
+        tracing::info!(url = %ws_url, "connecting");
+        match connect_async(&ws_url).await {
             Ok((mut ws, _)) => {
                 tracing::info!("connected");
                 attempt = 0;

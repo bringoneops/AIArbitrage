@@ -1,9 +1,12 @@
 mod agent;
 mod agents;
+mod config;
 mod http_client;
 
 use agents::{available_agents, make_agent};
 use canonicalizer::CanonicalService;
+use clap::Parser;
+use config::{Cli, Settings};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -15,8 +18,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
     let subscriber = FmtSubscriber::builder().with_target(false).finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
 
-    // CLI: ingestor binance:btcusdt,ethusdt binance:solusdt
-    let mut specs = std::env::args().skip(1).collect::<Vec<_>>();
+    // parse CLI and configuration
+    let cli = Cli::parse();
+    let mut specs = cli.specs.clone();
     if specs.is_empty() {
         eprintln!("Usage: ingestor <agent_spec> [<agent_spec> ...]");
         eprintln!("Examples:");
@@ -28,6 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         std::process::exit(2);
     }
+    let settings = Settings::load(&cli)?;
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -89,7 +94,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
 
     let mut handles = Vec::new();
     for spec in specs.drain(..) {
-        match make_agent(&spec).await {
+        match make_agent(&spec, &settings).await {
             Some(mut agent) => {
                 let rx = shutdown_rx.clone(); // no need for `mut`
                 let name = agent.name();

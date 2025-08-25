@@ -1,7 +1,7 @@
 pub mod binance;
 pub mod coinbase;
 
-use crate::agent::Agent;
+use crate::{agent::Agent, config::Settings};
 use canonicalizer::CanonicalService;
 use std::collections::HashMap;
 
@@ -42,7 +42,7 @@ async fn shared_symbols(
 
 /// Factory: "<agent>:<comma-separated-args>"
 /// e.g., "binance:btcusdt,ethusdt" or "binance:all"
-pub async fn make_agent(spec: &str) -> Option<Box<dyn Agent>> {
+pub async fn make_agent(spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>> {
     let (name, args) = match spec.split_once(':') {
         Some((n, a)) => (n.trim().to_lowercase(), a.trim().to_string()),
         None => (spec.trim().to_lowercase(), String::new()),
@@ -67,7 +67,7 @@ pub async fn make_agent(spec: &str) -> Option<Box<dyn Agent>> {
                 )
             };
 
-            match binance::BinanceAgent::new(symbols).await {
+            match binance::BinanceAgent::new(symbols, cfg).await {
                 Ok(agent) => Some(Box::new(agent)),
                 Err(e) => {
                     tracing::error!(error=%e, "failed to create binance agent");
@@ -92,7 +92,7 @@ pub async fn make_agent(spec: &str) -> Option<Box<dyn Agent>> {
                     .filter(|s| !s.is_empty())
                     .collect::<Vec<_>>()
             };
-            Some(Box::new(coinbase::CoinbaseAgent::new(symbols)))
+            Some(Box::new(coinbase::CoinbaseAgent::new(symbols, cfg)))
         }
         _ => None,
     }
