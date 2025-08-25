@@ -1,4 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
+use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
@@ -116,14 +117,14 @@ async fn connection_task(
                                             let price = v
                                                 .get("price")
                                                 .and_then(|p| p.as_str())
-                                                .and_then(|p| p.parse::<f64>().ok())
-                                                .map(|p| format!("{:.8}", p))
+                                                .and_then(|p| p.parse::<Decimal>().ok())
+                                                .map(|p| format!("{:.28}", p.round_dp(28)))
                                                 .unwrap_or_else(|| "?".to_string());
                                             let size = v
                                                 .get("size")
                                                 .and_then(|q| q.as_str())
-                                                .and_then(|q| q.parse::<f64>().ok())
-                                                .map(|q| format!("{:.8}", q))
+                                                .and_then(|q| q.parse::<Decimal>().ok())
+                                                .map(|q| format!("{:.28}", q.round_dp(28)))
                                                 .unwrap_or_else(|| "?".to_string());
                                             let ts = v
                                                 .get("time")
