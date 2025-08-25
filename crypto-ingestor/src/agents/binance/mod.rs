@@ -246,7 +246,10 @@ async fn connection_task(
 
                                         let raw = v.get("s").and_then(|s| s.as_str()).unwrap_or("?");
                                         let sym = CanonicalService::canonical_pair("binance", raw).unwrap_or_else(|| raw.to_string());
-                                        let trade_id = v.get("t").and_then(|t| t.as_i64()).unwrap_or_default();
+                                        let trade_id = v
+                                            .get("t")
+                                            .and_then(|t| t.as_i64())
+                                            .filter(|id| *id > 0);
                                         let px = v.get("p").and_then(|p| p.as_str()).unwrap_or("?");
                                         let qty = v.get("q").and_then(|q| q.as_str()).unwrap_or("?");
                                         let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
