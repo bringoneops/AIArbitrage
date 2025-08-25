@@ -7,6 +7,10 @@ use std::collections::HashMap;
 
 async fn shared_symbols(
 ) -> Result<(Vec<String>, Vec<String>), Box<dyn std::error::Error + Send + Sync>> {
+    // Ensure that the canonicalizer has loaded the quote asset list before we
+    // attempt any symbol comparisons.
+    CanonicalService::init().await;
+
     let (binance_all, coinbase_all) =
         tokio::try_join!(binance::fetch_all_symbols(), coinbase::fetch_all_symbols())?;
 
