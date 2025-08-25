@@ -3,7 +3,8 @@ use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::{agent::Agent, canonical::CanonicalService};
+use crate::agent::Agent;
+use canonicalizer::CanonicalService;
 
 const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
 const WS_URL: &str = "wss://stream.binance.us:9443/ws";

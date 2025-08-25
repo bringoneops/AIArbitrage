@@ -1,7 +1,8 @@
 pub mod binance;
 pub mod coinbase;
 
-use crate::{agent::Agent, canonical::CanonicalService};
+use crate::agent::Agent;
+use canonicalizer::CanonicalService;
 use std::collections::HashMap;
 
 async fn shared_symbols(

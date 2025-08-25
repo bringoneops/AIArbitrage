@@ -1,6 +1,5 @@
 mod agent;
 mod agents;
-mod canonical;
 
 use agents::{available_agents, make_agent};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};

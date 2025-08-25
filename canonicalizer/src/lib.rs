@@ -6,7 +6,6 @@
 /// `BASE-QUOTE` form are normalized to uppercase.
 ///
 /// Additional exchanges can be supported by extending `canonical_pair`.
-
 use std::collections::HashSet;
 use std::sync::OnceLock;
 

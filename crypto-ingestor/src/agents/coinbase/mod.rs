@@ -2,7 +2,8 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::{agent::Agent, canonical::CanonicalService};
+use crate::agent::Agent;
+use canonicalizer::CanonicalService;
 
 const WS_URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
