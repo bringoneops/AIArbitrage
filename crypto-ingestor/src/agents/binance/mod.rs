@@ -43,6 +43,12 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Erro
     Ok(symbols)
 }
 
+fn parse_decimal_str(s: &str) -> Option<String> {
+    s.parse::<Decimal>()
+        .ok()
+        .map(|d| d.round_dp(28).normalize().to_string())
+}
+
 pub struct BinanceAgent {
     symbols: Vec<String>,
     max_reconnect_delay_secs: u64,
@@ -257,14 +263,12 @@ async fn connection_task(
                                         let px = v
                                             .get("p")
                                             .and_then(|p| p.as_str())
-                                            .and_then(|p| p.parse::<Decimal>().ok())
-                                            .map(|p| format!("{:.28}", p.round_dp(28)))
+                                            .and_then(parse_decimal_str)
                                             .unwrap_or_else(|| "?".to_string());
                                         let qty = v
                                             .get("q")
                                             .and_then(|q| q.as_str())
-                                            .and_then(|q| q.parse::<Decimal>().ok())
-                                            .map(|q| format!("{:.28}", q.round_dp(28)))
+                                            .and_then(parse_decimal_str)
                                             .unwrap_or_else(|| "?".to_string());
                                         let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
                                         let line = serde_json::json!({
