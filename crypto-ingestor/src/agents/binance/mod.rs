@@ -4,11 +4,10 @@ use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-
-use crate::{agent::Agent, config::Settings, error::IngestorError, http_client};
 use crate::{
     agent::Agent,
     config::Settings,
+    error::IngestorError,
     http_client,
     metrics::{ERRORS, RECONNECTS, TRADES_RECEIVED},
 };
@@ -19,11 +18,13 @@ const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
 
 /// Fetch all tradable symbols from Binance US REST API.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
-    let client = http_client::builder().build().map_err(|e| IngestorError::Http {
-        source: e,
-        exchange: "binance",
-        symbol: None,
-    })?;
+    let client = http_client::builder()
+        .build()
+        .map_err(|e| IngestorError::Http {
+            source: e,
+            exchange: "binance",
+            symbol: None,
+        })?;
     let resp: serde_json::Value = client
         .get("https://api.binance.us/api/v3/exchangeInfo")
         .send()
@@ -78,10 +79,7 @@ pub struct BinanceAgent {
 }
 
 impl BinanceAgent {
-    pub async fn new(
-        symbols: Option<Vec<String>>,
-        cfg: &Settings,
-    ) -> Result<Self, IngestorError> {
+    pub async fn new(symbols: Option<Vec<String>>, cfg: &Settings) -> Result<Self, IngestorError> {
         let symbols = match symbols {
             Some(v) => v,
             None => fetch_all_symbols().await?,
