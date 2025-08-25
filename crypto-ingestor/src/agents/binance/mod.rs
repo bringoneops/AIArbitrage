@@ -4,25 +4,42 @@ use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
+
+use crate::{agent::Agent, config::Settings, error::IngestorError, http_client};
 use crate::{
     agent::Agent,
     config::Settings,
     http_client,
     metrics::{ERRORS, RECONNECTS, TRADES_RECEIVED},
 };
+
 use canonicalizer::CanonicalService;
 
 const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
 
 /// Fetch all tradable symbols from Binance US REST API.
-pub async fn fetch_all_symbols() -> Result<Vec<String>, Box<dyn std::error::Error + Send + Sync>> {
-    let client = http_client::builder().build()?;
+pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
+    let client = http_client::builder().build().map_err(|e| IngestorError::Http {
+        source: e,
+        exchange: "binance",
+        symbol: None,
+    })?;
     let resp: serde_json::Value = client
         .get("https://api.binance.us/api/v3/exchangeInfo")
         .send()
-        .await?
+        .await
+        .map_err(|e| IngestorError::Http {
+            source: e,
+            exchange: "binance",
+            symbol: None,
+        })?
         .json()
-        .await?;
+        .await
+        .map_err(|e| IngestorError::Http {
+            source: e,
+            exchange: "binance",
+            symbol: None,
+        })?;
 
     let symbols = resp
         .get("symbols")
@@ -64,7 +81,7 @@ impl BinanceAgent {
     pub async fn new(
         symbols: Option<Vec<String>>,
         cfg: &Settings,
-    ) -> Result<Self, Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<Self, IngestorError> {
         let symbols = match symbols {
             Some(v) => v,
             None => fetch_all_symbols().await?,
@@ -89,7 +106,7 @@ impl Agent for BinanceAgent {
         &mut self,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
         out_tx: mpsc::Sender<String>,
-    ) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    ) -> Result<(), IngestorError> {
         let mut handles = Vec::new();
         let mut symbol_txs = Vec::new();
 

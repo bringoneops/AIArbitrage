@@ -1,10 +1,12 @@
 mod agent;
 mod agents;
 mod config;
+mod error;
 mod http_client;
 mod metrics;
 
 use agents::{available_agents, make_agent};
+use error::IngestorError;
 use canonicalizer::CanonicalService;
 use clap::Parser;
 use config::{Cli, Settings};
@@ -14,7 +16,7 @@ use tokio::sync::mpsc;
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main(flavor = "multi_thread")]
-async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+async fn main() -> Result<(), IngestorError> {
     // logger
     let subscriber = FmtSubscriber::builder().with_target(false).finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
@@ -56,7 +58,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
         }
         let status = build.status().await?;
         if !status.success() {
-            return Err("failed to build canonicalizer".into());
+            return Err(IngestorError::Other("failed to build canonicalizer".into()));
         }
     }
     let (tx, rx) = mpsc::channel::<String>(100);
