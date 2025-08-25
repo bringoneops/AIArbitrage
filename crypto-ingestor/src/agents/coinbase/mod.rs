@@ -4,7 +4,6 @@ use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, Web
 
 use crate::agent::Agent;
 use canonicalizer::CanonicalService;
-use serde_json::Value;
 
 const WS_URL: &str = "wss://ws-feed.exchange.coinbase.com";
 
@@ -123,11 +122,6 @@ async fn connection_task(
                                                 .and_then(|q| q.parse::<f64>().ok())
                                                 .map(|q| format!("{:.8}", q))
                                                 .unwrap_or_else(|| "?".to_string());
-                                                .filter(|id| *id > 0)
-                                                .map(Value::from)
-                                                .unwrap_or(Value::Null);
-                                            let price = v.get("price").and_then(|p| p.as_str()).unwrap_or("?");
-                                            let size = v.get("size").and_then(|q| q.as_str()).unwrap_or("?");
                                             let ts = v
                                                 .get("time")
                                                 .and_then(|t| t.as_str())
