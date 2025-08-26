@@ -12,6 +12,7 @@ use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 use tracing::info;
+use canonicalizer::{Candle, Ticker};
 
 pub mod orderbook;
 pub mod monitor;
@@ -45,57 +46,77 @@ pub struct SpreadEvent {
 
 /// Spawn the analytics task.
 ///
-/// Returns a [`mpsc::Sender`] accepting [`Trade`] messages and a
-/// [`broadcast::Receiver`] yielding [`SpreadEvent`] notifications.
-pub fn spawn(threshold: f64) -> (mpsc::Sender<Trade>, broadcast::Receiver<SpreadEvent>) {
-    let (tx, mut rx) = mpsc::channel::<Trade>(100);
+/// Returns channels accepting [`Trade`], [`Candle`], and [`Ticker`] messages
+/// along with a [`broadcast::Receiver`] yielding [`SpreadEvent`] notifications.
+pub fn spawn(
+    threshold: f64,
+) -> (
+    mpsc::Sender<Trade>,
+    mpsc::Sender<Candle>,
+    mpsc::Sender<Ticker>,
+    broadcast::Receiver<SpreadEvent>,
+) {
+    let (trade_tx, mut trade_rx) = mpsc::channel::<Trade>(100);
+    let (candle_tx, mut candle_rx) = mpsc::channel::<Candle>(100);
+    let (ticker_tx, mut ticker_rx) = mpsc::channel::<Ticker>(100);
     let (event_tx, event_rx) = broadcast::channel(100);
 
     tokio::spawn(async move {
         let mut prices: HashMap<String, HashMap<String, f64>> = HashMap::new();
+        let mut _candles: HashMap<String, HashMap<String, Candle>> = HashMap::new();
+        let mut _tickers: HashMap<String, Ticker> = HashMap::new();
 
-        while let Some(trade) = rx.recv().await {
-            let Trade {
-                agent: exch,
-                symbol: sym,
-                price: price_str,
-            } = trade;
-            if let Ok(price) = price_str.parse::<f64>() {
-                let entry = prices.entry(sym.clone()).or_default();
-                entry.insert(exch, price);
+        loop {
+            tokio::select! {
+                Some(trade) = trade_rx.recv() => {
+                    let Trade { agent: exch, symbol: sym, price: price_str } = trade;
+                    if let Ok(price) = price_str.parse::<f64>() {
+                        let entry = prices.entry(sym.clone()).or_default();
+                        entry.insert(exch, price);
 
-                if entry.len() >= 2 {
-                    let mut best_buy: Option<(&String, f64)> = None;
-                    let mut best_sell: Option<(&String, f64)> = None;
-                    for (e, p) in entry.iter() {
-                        if best_buy.as_ref().map_or(true, |(_, bp)| p < bp) {
-                            best_buy = Some((e, *p));
-                        }
-                        if best_sell.as_ref().map_or(true, |(_, sp)| p > sp) {
-                            best_sell = Some((e, *p));
-                        }
-                    }
-                    if let (Some((buy_ex, buy_p)), Some((sell_ex, sell_p))) = (best_buy, best_sell)
-                    {
-                        let spread = sell_p - buy_p;
-                        if spread >= threshold {
-                            let event = SpreadEvent {
-                                symbol: sym,
-                                buy_exchange: buy_ex.clone(),
-                                sell_exchange: sell_ex.clone(),
-                                spread,
-                                timestamp: Utc::now().timestamp_millis(),
-                            };
-                            let _ = event_tx.send(event.clone());
-                            info!(?event, "arbitrage opportunity");
+                        if entry.len() >= 2 {
+                            let mut best_buy: Option<(&String, f64)> = None;
+                            let mut best_sell: Option<(&String, f64)> = None;
+                            for (e, p) in entry.iter() {
+                                if best_buy.as_ref().map_or(true, |(_, bp)| p < bp) {
+                                    best_buy = Some((e, *p));
+                                }
+                                if best_sell.as_ref().map_or(true, |(_, sp)| p > sp) {
+                                    best_sell = Some((e, *p));
+                                }
+                            }
+                            if let (Some((buy_ex, buy_p)), Some((sell_ex, sell_p))) = (best_buy, best_sell) {
+                                let spread = sell_p - buy_p;
+                                if spread >= threshold {
+                                    let event = SpreadEvent {
+                                        symbol: sym,
+                                        buy_exchange: buy_ex.clone(),
+                                        sell_exchange: sell_ex.clone(),
+                                        spread,
+                                        timestamp: Utc::now().timestamp_millis(),
+                                    };
+                                    let _ = event_tx.send(event.clone());
+                                    info!(?event, "arbitrage opportunity");
+                                }
+                            }
                         }
                     }
                 }
+                Some(candle) = candle_rx.recv() => {
+                    _candles
+                        .entry(candle.symbol.clone())
+                        .or_default()
+                        .insert(candle.interval.clone(), candle);
+                }
+                Some(ticker) = ticker_rx.recv() => {
+                    _tickers.insert(ticker.symbol.clone(), ticker);
+                }
+                else => break,
             }
         }
     });
 
-    (tx, event_rx)
+    (trade_tx, candle_tx, ticker_tx, event_rx)
 }
 
 #[cfg(test)]
@@ -104,7 +125,7 @@ mod tests {
 
     #[tokio::test]
     async fn emits_spread_events() {
-        let (tx, mut rx) = spawn(10.0);
+        let (tx, _c, _t, mut rx) = spawn(10.0);
         tx.send(Trade {
             agent: "a".into(),
             symbol: "BTC-USD".into(),

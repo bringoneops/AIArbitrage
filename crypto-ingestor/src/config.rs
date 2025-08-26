@@ -109,6 +109,8 @@ pub struct Settings {
     pub coinbase_ws_url: String,
     pub coinbase_refresh_interval_mins: u64,
     pub coinbase_max_reconnect_delay_secs: u64,
+    #[serde(default = "default_intervals")]
+    pub kline_intervals: Vec<String>,
     #[serde(default = "default_sink")]
     pub sink: String,
     #[serde(default)]
@@ -154,6 +156,8 @@ fn default_sink() -> String {
     "stdout".into()
 }
 
+fn default_intervals() -> Vec<String> {
+    vec!["1s", "1m", "1h", "1d"].into_iter().map(String::from).collect()
 fn default_binance_options_poll_interval_secs() -> u64 {
     60
 }
@@ -171,6 +175,7 @@ impl Default for Settings {
             coinbase_ws_url: String::new(),
             coinbase_refresh_interval_mins: DEFAULT_COINBASE_REFRESH_INTERVAL_MINS,
             coinbase_max_reconnect_delay_secs: 30,
+            kline_intervals: default_intervals(),
             sink: default_sink(),
             kafka_brokers: None,
             kafka_topic: None,
@@ -208,6 +213,7 @@ impl Settings {
                 DEFAULT_COINBASE_REFRESH_INTERVAL_MINS,
             )?
             .set_default("coinbase_max_reconnect_delay_secs", 30)?
+            .set_default("kline_intervals", vec!["1s", "1m", "1h", "1d"])?
             .set_default("sink", "stdout")?
             .set_default("trades", false)?
             .set_default("l2_diffs", false)?
