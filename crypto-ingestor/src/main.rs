@@ -3,7 +3,8 @@ mod agents;
 mod config;
 mod error;
 mod http_client;
-mod metrics;
+extern crate metrics_core as metrics;
+mod telemetry;
 
 use agents::{available_agents, make_agent};
 use error::IngestorError;
@@ -38,7 +39,7 @@ async fn main() -> Result<(), IngestorError> {
     let settings = Settings::load(&cli)?;
 
     // metrics server
-    tokio::spawn(metrics::serve(([0, 0, 0, 0], 9898).into()));
+    tokio::spawn(telemetry::serve(([0, 0, 0, 0], 9898).into()));
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -114,7 +115,7 @@ async fn main() -> Result<(), IngestorError> {
                     }
                     status = canon_child.wait() => {
                         tracing::warn!(?status, "canonicalizer exited; restarting");
-                        metrics::counter!("canonicalizer_restarts", 1);
+                        metrics_core::counter!("canonicalizer_restarts", 1);
                         break;
                     }
                 }

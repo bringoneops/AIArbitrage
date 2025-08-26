@@ -9,7 +9,7 @@ use crate::{
     config::Settings,
     error::IngestorError,
     http_client,
-    metrics::{ERRORS, RECONNECTS, TRADES_RECEIVED},
+    telemetry::{ERRORS, RECONNECTS, TRADES_RECEIVED},
 };
 
 use canonicalizer::CanonicalService;
