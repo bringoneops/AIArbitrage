@@ -4,9 +4,7 @@ mod config;
 mod error;
 mod http_client;
 mod metrics;
-extern crate metrics_core as metrics;
 mod sink;
-mod telemetry;
 
 use agents::{available_agents, make_agent};
 use canonicalizer::CanonicalService;
