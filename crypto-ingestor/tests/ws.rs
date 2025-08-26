@@ -37,6 +37,7 @@ async fn coinbase_trade_messages_are_canonicalized_with_id() {
         binance_refresh_interval_mins: 60,
         binance_max_reconnect_delay_secs: 1,
         coinbase_ws_url: format!("ws://{}", addr),
+        coinbase_refresh_interval_mins: 60,
         coinbase_max_reconnect_delay_secs: 1,
     };
 
@@ -90,6 +91,7 @@ async fn binance_trade_messages_are_canonicalized_with_id() {
         binance_refresh_interval_mins: 60,
         binance_max_reconnect_delay_secs: 1,
         coinbase_ws_url: "ws://localhost".into(),
+        coinbase_refresh_interval_mins: 60,
         coinbase_max_reconnect_delay_secs: 1,
     };
 
