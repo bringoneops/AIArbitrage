@@ -71,6 +71,7 @@ pub struct BinanceAgent {
     ws_url: String,
     max_reconnect_delay_secs: u64,
     refresh_interval_mins: u64,
+    kline_intervals: Vec<String>,
 }
 
 impl BinanceAgent {
@@ -85,6 +86,7 @@ impl BinanceAgent {
             ws_url: cfg.binance_ws_url.clone(),
             max_reconnect_delay_secs: cfg.binance_max_reconnect_delay_secs,
             refresh_interval_mins: cfg.binance_refresh_interval_mins,
+            kline_intervals: cfg.kline_intervals.clone(),
         })
     }
 }
@@ -115,9 +117,10 @@ impl Agent for BinanceAgent {
             let shutdown_rx = shutdown.clone();
             let max_delay = self.max_reconnect_delay_secs;
             let ws_url = self.ws_url.clone();
+            let intervals = self.kline_intervals.clone();
             let tx_clone = out_tx.clone();
             handles.push(tokio::spawn(async move {
-                connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
+                connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay, intervals).await;
             }));
         }
 
@@ -166,8 +169,9 @@ impl Agent for BinanceAgent {
                                         let tx_conn = out_tx.clone();
                                         let max_delay = self.max_reconnect_delay_secs;
                                         let ws_url = self.ws_url.clone();
+                                        let intervals = self.kline_intervals.clone();
                                         handles.push(tokio::spawn(async move {
-                                            connection_task(rx, shutdown_rx, tx_conn, ws_url, max_delay).await;
+                                            connection_task(rx, shutdown_rx, tx_conn, ws_url, max_delay, intervals).await;
                                         }));
                                     }
                                 } else {
@@ -238,6 +242,7 @@ async fn connection_task(
     tx: mpsc::Sender<String>,
     ws_url: String,
     max_reconnect_delay_secs: u64,
+    intervals: Vec<String>,
 ) {
     let mut attempt: u32 = 0;
 
@@ -254,7 +259,7 @@ async fn connection_task(
                 attempt = 0;
                 ACTIVE_CONNECTIONS.with_label_values(&["binance"]).inc();
 
-                if let Err(e) = send_subscribe(&mut ws, &current_symbols).await {
+                if let Err(e) = send_subscribe(&mut ws, &current_symbols, &intervals).await {
                     tracing::error!(error=%e, "failed to send subscription");
                     ACTIVE_CONNECTIONS.with_label_values(&["binance"]).dec();
                     continue;
@@ -280,10 +285,10 @@ async fn connection_task(
                                     let to_unsub: Vec<_> = old_set.difference(&new_set).cloned().collect();
 
                                     if !to_unsub.is_empty() {
-                                        let _ = send_unsubscribe(&mut ws, &to_unsub).await;
+                                        let _ = send_unsubscribe(&mut ws, &to_unsub, &intervals).await;
                                     }
                                     if !to_sub.is_empty() {
-                                        if let Err(e) = send_subscribe(&mut ws, &to_sub).await {
+                                        if let Err(e) = send_subscribe(&mut ws, &to_sub, &intervals).await {
                                             tracing::error!(error=%e, "failed to update subscription");
                                             break;
                                         }
@@ -310,38 +315,100 @@ async fn connection_task(
 
                                         let raw = v.get("s").and_then(|s| s.as_str()).unwrap_or("?");
                                         let sym = CanonicalService::canonical_pair("binance", raw).unwrap_or_else(|| raw.to_string());
-                                        // Missing or non-positive trade IDs are represented as JSON null.
-                                        let trade_id = v
-                                            .get("t")
-                                            .and_then(|t| t.as_i64())
-                                            .filter(|id| *id > 0);
-                                        let px = v
-                                            .get("p")
-                                            .and_then(|p| p.as_str())
-                                            .and_then(parse_decimal_str)
-                                            .unwrap_or_else(|| "?".to_string());
-                                        let qty = v
-                                            .get("q")
-                                            .and_then(|q| q.as_str())
-                                            .and_then(parse_decimal_str)
-                                            .unwrap_or_else(|| "?".to_string());
-                                        let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
-                                        let line = serde_json::json!({
-                                            "agent": "binance",
-                                            "type": "trade",
-                                            "s": sym,
-                                            "t": trade_id,
-                                            "p": px,
-                                            "q": qty,
-                                            "ts": ts
-                                        }).to_string();
-                                        if tx.send(line).await.is_ok() {
-                                            MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
-                                            LAST_TRADE_TIMESTAMP
-                                                .with_label_values(&["binance"])
-                                                .set(ts);
-                                        } else {
-                                            break;
+                                        if let Some(event) = v.get("e").and_then(|e| e.as_str()) {
+                                            match event {
+                                                "trade" => {
+                                                    let trade_id = v
+                                                        .get("t")
+                                                        .and_then(|t| t.as_i64())
+                                                        .filter(|id| *id > 0);
+                                                    let px = v
+                                                        .get("p")
+                                                        .and_then(|p| p.as_str())
+                                                        .and_then(parse_decimal_str)
+                                                        .unwrap_or_else(|| "?".to_string());
+                                                    let qty = v
+                                                        .get("q")
+                                                        .and_then(|q| q.as_str())
+                                                        .and_then(parse_decimal_str)
+                                                        .unwrap_or_else(|| "?".to_string());
+                                                    let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
+                                                    let line = serde_json::json!({
+                                                        "agent": "binance",
+                                                        "type": "trade",
+                                                        "s": sym,
+                                                        "t": trade_id,
+                                                        "p": px,
+                                                        "q": qty,
+                                                        "ts": ts
+                                                    }).to_string();
+                                                    if tx.send(line).await.is_ok() {
+                                                        MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
+                                                        LAST_TRADE_TIMESTAMP
+                                                            .with_label_values(&["binance"])
+                                                            .set(ts);
+                                                    } else {
+                                                        break;
+                                                    }
+                                                }
+                                                "kline" => {
+                                                    if let Some(k) = v.get("k") {
+                                                        if k.get("x").and_then(|b| b.as_bool()).unwrap_or(false) {
+                                                            let interval = k.get("i").and_then(|i| i.as_str()).unwrap_or("");
+                                                            let open = k.get("o").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                            let high = k.get("h").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                            let low = k.get("l").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                            let close = k.get("c").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                            let vol = k.get("v").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                            let ts = k.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
+                                                            let line = serde_json::json!({
+                                                                "agent": "binance",
+                                                                "type": "candle",
+                                                                "s": sym,
+                                                                "i": interval,
+                                                                "o": open,
+                                                                "h": high,
+                                                                "l": low,
+                                                                "c": close,
+                                                                "v": vol,
+                                                                "ts": ts
+                                                            }).to_string();
+                                                            if tx.send(line).await.is_ok() {
+                                                                MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
+                                                            } else {
+                                                                break;
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                "24hrTicker" => {
+                                                    let price = v
+                                                        .get("c")
+                                                        .and_then(|p| p.as_str())
+                                                        .and_then(parse_decimal_str)
+                                                        .unwrap_or_else(|| "?".to_string());
+                                                    let vol = v
+                                                        .get("v")
+                                                        .and_then(|p| p.as_str())
+                                                        .and_then(parse_decimal_str)
+                                                        .unwrap_or_else(|| "?".to_string());
+                                                    let ts = v.get("E").and_then(|x| x.as_i64()).unwrap_or_default();
+                                                    let line = serde_json::json!({
+                                                        "agent": "binance",
+                                                        "type": "ticker",
+                                                        "s": sym,
+                                                        "p": price,
+                                                        "v": vol,
+                                                        "ts": ts
+                                                    }).to_string();
+                                                    if tx.send(line).await.is_ok() {
+                                                        MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
+                                                    } else {
+                                                        break;
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
                                         }
                                     } else {
                                         tracing::warn!("non-json text msg");
@@ -384,11 +451,16 @@ async fn connection_task(
 async fn send_subscribe(
     ws: &mut WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
     symbols: &[String],
+    intervals: &[String],
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
-    let params = symbols
-        .iter()
-        .map(|s| format!("{}@trade", s))
-        .collect::<Vec<_>>();
+    let mut params = Vec::new();
+    for s in symbols {
+        params.push(format!("{}@trade", s));
+        params.push(format!("{}@ticker", s));
+        for i in intervals {
+            params.push(format!("{}@kline_{}", s, i));
+        }
+    }
     let sub_msg = serde_json::json!({
         "method": "SUBSCRIBE",
         "params": params,
@@ -400,14 +472,19 @@ async fn send_subscribe(
 async fn send_unsubscribe(
     ws: &mut WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
     symbols: &[String],
+    intervals: &[String],
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     if symbols.is_empty() {
         return Ok(());
     }
-    let params = symbols
-        .iter()
-        .map(|s| format!("{}@trade", s))
-        .collect::<Vec<_>>();
+    let mut params = Vec::new();
+    for s in symbols {
+        params.push(format!("{}@trade", s));
+        params.push(format!("{}@ticker", s));
+        for i in intervals {
+            params.push(format!("{}@kline_{}", s, i));
+        }
+    }
     let msg = serde_json::json!({
         "method": "UNSUBSCRIBE",
         "params": params,

@@ -1,4 +1,5 @@
 use analytics::{spawn, Trade};
+use canonicalizer::{Candle, Ticker};
 use serde_json::Value;
 use tokio::io::{self, AsyncBufReadExt};
 use tracing_subscriber::FmtSubscriber;
@@ -13,9 +14,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .and_then(|s| s.parse::<f64>().ok())
         .unwrap_or(1.0);
 
-    let (tx, mut rx) = spawn(threshold);
+    let (trade_tx, candle_tx, ticker_tx, mut rx) = spawn(threshold);
 
-    // Task to read canonicalized trades from STDIN and forward to analytics
+    // Task to read canonicalized events from STDIN and forward to analytics
     tokio::spawn(async move {
         let stdin = io::BufReader::new(io::stdin());
         let mut lines = stdin.lines();
@@ -25,8 +26,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             match serde_json::from_str::<Value>(&line) {
                 Ok(v) => {
-                    if let Ok(trade) = serde_json::from_value::<Trade>(v) {
-                        let _ = tx.send(trade).await;
+                    match v.get("type").and_then(|t| t.as_str()) {
+                        Some("trade") => {
+                            if let Ok(trade) = serde_json::from_value::<Trade>(v.clone()) {
+                                let _ = trade_tx.send(trade).await;
+                            }
+                        }
+                        Some("candle") => {
+                            if let Ok(candle) = serde_json::from_value::<Candle>(v.clone()) {
+                                let _ = candle_tx.send(candle).await;
+                            }
+                        }
+                        Some("ticker") => {
+                            if let Ok(ticker) = serde_json::from_value::<Ticker>(v.clone()) {
+                                let _ = ticker_tx.send(ticker).await;
+                            }
+                        }
+                        _ => {}
                     }
                 }
                 Err(_) => {

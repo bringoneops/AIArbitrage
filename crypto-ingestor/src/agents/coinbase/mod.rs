@@ -59,6 +59,7 @@ pub struct CoinbaseAgent {
     ws_url: String,
     max_reconnect_delay_secs: u64,
     refresh_interval_mins: u64,
+    kline_intervals: Vec<String>,
 }
 
 impl CoinbaseAgent {
@@ -68,6 +69,7 @@ impl CoinbaseAgent {
             ws_url: cfg.coinbase_ws_url.clone(),
             max_reconnect_delay_secs: cfg.coinbase_max_reconnect_delay_secs,
             refresh_interval_mins: cfg.coinbase_refresh_interval_mins,
+            kline_intervals: cfg.kline_intervals.clone(),
         }
     }
 }
@@ -93,8 +95,9 @@ impl Agent for CoinbaseAgent {
             let tx_clone = tx.clone();
             let ws_url = self.ws_url.clone();
             let max_delay = self.max_reconnect_delay_secs;
+            let intervals = self.kline_intervals.clone();
             handle = Some(tokio::spawn(async move {
-                connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
+                connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay, intervals).await;
             }));
         }
 
@@ -138,8 +141,9 @@ impl Agent for CoinbaseAgent {
                                     let tx_clone = tx.clone();
                                     let ws_url = self.ws_url.clone();
                                     let max_delay = self.max_reconnect_delay_secs;
+                                    let intervals = self.kline_intervals.clone();
                                     handle = Some(tokio::spawn(async move {
-                                        connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
+                                        connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay, intervals).await;
                                     }));
                                 }
                             }
@@ -192,6 +196,7 @@ async fn connection_task(
     tx: mpsc::Sender<String>,
     ws_url: String,
     max_reconnect_delay_secs: u64,
+    intervals: Vec<String>,
 ) {
     let mut attempt: u32 = 0;
 
@@ -208,7 +213,7 @@ async fn connection_task(
                 attempt = 0;
                 ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).inc();
 
-                if let Err(e) = send_subscribe(&mut ws, &current_symbols).await {
+                if let Err(e) = send_subscribe(&mut ws, &current_symbols, &intervals).await {
                     tracing::error!(error=%e, "failed to send subscription");
                     ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).dec();
                     continue;
@@ -234,10 +239,10 @@ async fn connection_task(
                                     let to_unsub: Vec<_> = old_set.difference(&new_set).cloned().collect();
 
                                     if !to_unsub.is_empty() {
-                                        let _ = send_unsubscribe(&mut ws, &to_unsub).await;
+                                        let _ = send_unsubscribe(&mut ws, &to_unsub, &intervals).await;
                                     }
                                     if !to_sub.is_empty() {
-                                            if let Err(e) = send_subscribe(&mut ws, &to_sub).await {
+                                            if let Err(e) = send_subscribe(&mut ws, &to_sub, &intervals).await {
                                             tracing::error!(error=%e, "failed to update subscription");
                                             break;
                                         }
@@ -257,50 +262,115 @@ async fn connection_task(
                                 Some(Ok(Message::Text(txt))) => {
                                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
                                         let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                                        if typ == "match" {
-                                            let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
-                                            let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
-                                            // Missing or non-positive trade IDs are represented as JSON null.
-                                            let trade_id = v
-                                                .get("trade_id")
-                                                .and_then(|id| id.as_i64())
-                                                .filter(|id| *id > 0);
-                                            let price = v
-                                                .get("price")
-                                                .and_then(|p| p.as_str())
-                                                .and_then(parse_decimal_str)
-                                                .unwrap_or_else(|| "?".to_string());
-                                            let size = v
-                                                .get("size")
-                                                .and_then(|q| q.as_str())
-                                                .and_then(parse_decimal_str)
-                                                .unwrap_or_else(|| "?".to_string());
-                                            let ts = v
-                                                .get("time")
-                                                .and_then(|t| t.as_str())
-                                                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                                                .map(|dt| dt.timestamp_millis())
-                                                .unwrap_or_default();
-                                            let line = serde_json::json!({
-                                                "agent": "coinbase",
-                                                "type": "trade",
-                                                "s": sym,
-                                                "t": trade_id,
-                                                "p": price,
-                                                "q": size,
-                                                "ts": ts
-                                            }).to_string();
-                                            if tx.send(line).await.is_ok() {
-                                                MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
-                                                LAST_TRADE_TIMESTAMP
-                                                    .with_label_values(&["coinbase"])
-                                                    .set(ts);
-                                            } else {
-                                                break;
+                                        match typ {
+                                            "match" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let trade_id = v
+                                                    .get("trade_id")
+                                                    .and_then(|id| id.as_i64())
+                                                    .filter(|id| *id > 0);
+                                                let price = v
+                                                    .get("price")
+                                                    .and_then(|p| p.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let size = v
+                                                    .get("size")
+                                                    .and_then(|q| q.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let ts = v
+                                                    .get("time")
+                                                    .and_then(|t| t.as_str())
+                                                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                    .map(|dt| dt.timestamp_millis())
+                                                    .unwrap_or_default();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "trade",
+                                                    "s": sym,
+                                                    "t": trade_id,
+                                                    "p": price,
+                                                    "q": size,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                    LAST_TRADE_TIMESTAMP
+                                                        .with_label_values(&["coinbase"])
+                                                        .set(ts);
+                                                } else {
+                                                    break;
+                                                }
                                             }
+                                            "ticker" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let price = v
+                                                    .get("price")
+                                                    .and_then(|p| p.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let vol = v
+                                                    .get("volume_24h")
+                                                    .and_then(|p| p.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let ts = v
+                                                    .get("time")
+                                                    .and_then(|t| t.as_str())
+                                                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                    .map(|dt| dt.timestamp_millis())
+                                                    .unwrap_or_default();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "ticker",
+                                                    "s": sym,
+                                                    "p": price,
+                                                    "v": vol,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                } else {
+                                                    break;
+                                                }
+                                            }
+                                            "candles" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let interval = v.get("granularity").map(|g| g.to_string()).unwrap_or_default();
+                                                if let Some(arr) = v.get("candles").and_then(|c| c.as_array()).and_then(|a| a.first()).and_then(|c| c.as_array()) {
+                                                    let ts = arr.get(0).and_then(|x| x.as_i64()).unwrap_or_default() * 1000;
+                                                    let low = arr.get(1).map(|v| parse_decimal_str(&v.to_string()).unwrap_or_else(|| "?".to_string())).unwrap_or_else(|| "?".to_string());
+                                                    let high = arr.get(2).map(|v| parse_decimal_str(&v.to_string()).unwrap_or_else(|| "?".to_string())).unwrap_or_else(|| "?".to_string());
+                                                    let open = arr.get(3).map(|v| parse_decimal_str(&v.to_string()).unwrap_or_else(|| "?".to_string())).unwrap_or_else(|| "?".to_string());
+                                                    let close = arr.get(4).map(|v| parse_decimal_str(&v.to_string()).unwrap_or_else(|| "?".to_string())).unwrap_or_else(|| "?".to_string());
+                                                    let vol = arr.get(5).map(|v| parse_decimal_str(&v.to_string()).unwrap_or_else(|| "?".to_string())).unwrap_or_else(|| "?".to_string());
+                                                    let line = serde_json::json!({
+                                                        "agent": "coinbase",
+                                                        "type": "candle",
+                                                        "s": sym,
+                                                        "i": interval,
+                                                        "o": open,
+                                                        "h": high,
+                                                        "l": low,
+                                                        "c": close,
+                                                        "v": vol,
+                                                        "ts": ts
+                                                    }).to_string();
+                                                    if tx.send(line).await.is_ok() {
+                                                        MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                    } else {
+                                                        break;
+                                                    }
+                                                }
+                                            }
+                                            _ => {}
                                         }
                                     } else {
-                                        tracing::warn!("non-json text msg");
+                                    tracing::warn!("non-json text msg");
                                     }
                                 }
                                 Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; }
@@ -344,11 +414,16 @@ async fn connection_task(
 async fn send_subscribe(
     ws: &mut WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
     symbols: &[String],
+    intervals: &[String],
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+    let mut channels = vec![serde_json::json!("matches"), serde_json::json!("ticker")];
+    for i in intervals {
+        channels.push(serde_json::json!({"name": "candles", "product_ids": symbols, "interval": i}));
+    }
     let msg = serde_json::json!({
         "type": "subscribe",
         "product_ids": symbols,
-        "channels": ["matches"],
+        "channels": channels,
     });
     ws.send(Message::Text(msg.to_string())).await
 }
@@ -356,14 +431,19 @@ async fn send_subscribe(
 async fn send_unsubscribe(
     ws: &mut WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
     symbols: &[String],
+    intervals: &[String],
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     if symbols.is_empty() {
         return Ok(());
     }
+    let mut channels = vec![serde_json::json!("matches"), serde_json::json!("ticker")];
+    for _ in intervals {
+        channels.push(serde_json::json!({"name": "candles"}));
+    }
     let msg = serde_json::json!({
         "type": "unsubscribe",
         "product_ids": symbols,
-        "channels": ["matches"],
+        "channels": channels,
     });
     ws.send(Message::Text(msg.to_string())).await
 }

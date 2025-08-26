@@ -22,7 +22,58 @@ mod http_client;
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+use serde::{Deserialize, Serialize};
 use tracing::warn;
+
+/// Canonicalized candle event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Candle {
+    /// Source exchange name.
+    pub agent: String,
+    /// Canonical `BASE-QUOTE` symbol.
+    #[serde(rename = "s")]
+    pub symbol: String,
+    /// Candle interval (e.g., `1m`).
+    #[serde(rename = "i")]
+    pub interval: String,
+    /// Open price.
+    #[serde(rename = "o")]
+    pub open: String,
+    /// High price.
+    #[serde(rename = "h")]
+    pub high: String,
+    /// Low price.
+    #[serde(rename = "l")]
+    pub low: String,
+    /// Close price.
+    #[serde(rename = "c")]
+    pub close: String,
+    /// Traded volume.
+    #[serde(rename = "v")]
+    pub volume: String,
+    /// Candle close timestamp (ms).
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
+
+/// Canonical 24h ticker event.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Ticker {
+    /// Source exchange name.
+    pub agent: String,
+    /// Canonical `BASE-QUOTE` symbol.
+    #[serde(rename = "s")]
+    pub symbol: String,
+    /// Last traded price.
+    #[serde(rename = "p")]
+    pub price: String,
+    /// 24h volume.
+    #[serde(rename = "v")]
+    pub volume: String,
+    /// Event timestamp (ms).
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
 
 pub struct CanonicalService;
 
