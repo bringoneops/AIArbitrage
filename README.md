@@ -14,6 +14,12 @@ This repository is organised as a Cargo workspace containing two crates:
 - `binance` – streams trade data for selected symbols via WebSocket.
 - `coinbase` – streams trade data for selected pairs via WebSocket.
 
+## Metrics
+
+`crypto-ingestor` exposes Prometheus metrics and a health check on port `9898`.
+Visit `http://localhost:9898/metrics` for metrics and `http://localhost:9898/health`
+for a simple readiness probe.
+
 ## Canonicalizer
 
 The `canonicalizer` crate provides both the `CanonicalService` library and a

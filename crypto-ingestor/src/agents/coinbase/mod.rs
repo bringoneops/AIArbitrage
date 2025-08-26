@@ -8,7 +8,7 @@ use crate::{
     config::Settings,
     error::IngestorError,
     http_client,
-    telemetry::{ERRORS, RECONNECTS, TRADES_RECEIVED},
+    metrics::{ACTIVE_CONNECTIONS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
 };
 use canonicalizer::CanonicalService;
 
@@ -116,10 +116,11 @@ async fn connection_task(
             Ok((mut ws, _)) => {
                 tracing::info!("connected");
                 attempt = 0;
+                ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).inc();
 
                 if let Err(e) = send_subscribe(&mut ws, &symbols).await {
                     tracing::error!(error=%e, "failed to send subscription");
-                    ERRORS.with_label_values(&["coinbase"]).inc();
+                    ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).dec();
                     continue;
                 }
 
@@ -129,6 +130,7 @@ async fn connection_task(
                             if *shutdown.borrow() {
                                 tracing::info!("shutdown signal - closing connection");
                                 let _ = ws.close(None).await;
+                                ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).dec();
                                 return;
                             }
                         }
@@ -171,7 +173,10 @@ async fn connection_task(
                                                 "ts": ts
                                             }).to_string();
                                             if tx.send(line).await.is_ok() {
-                                                TRADES_RECEIVED.with_label_values(&["coinbase"]).inc();
+                                                MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                LAST_TRADE_TIMESTAMP
+                                                    .with_label_values(&["coinbase"])
+                                                    .set(ts);
                                             } else {
                                                 break;
                                             }
@@ -183,16 +188,16 @@ async fn connection_task(
                                 Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; }
                                 Some(Ok(Message::Close(frame))) => { tracing::warn!(?frame, "server closed connection"); break; }
                                 Some(Ok(_)) => { }
-                                Some(Err(e)) => { tracing::error!(error=%e, "ws error"); ERRORS.with_label_values(&["coinbase"]).inc(); break; }
+                                Some(Err(e)) => { tracing::error!(error=%e, "ws error"); break; }
                                 None => { tracing::warn!("stream ended"); break; }
                             }
                         }
                     }
                 }
+                ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).dec();
             }
             Err(e) => {
                 tracing::error!(error=%e, "connect failed");
-                ERRORS.with_label_values(&["coinbase"]).inc();
             }
         }
 
@@ -201,7 +206,6 @@ async fn connection_task(
         let delay = (1u64 << exp).min(max_reconnect_delay_secs);
         let sleep = std::time::Duration::from_secs(delay);
 
-        RECONNECTS.with_label_values(&["coinbase"]).inc();
         tracing::info!(?sleep, "reconnecting");
         tokio::select! {
             _ = tokio::time::sleep(sleep) => {},
