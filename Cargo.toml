@@ -3,6 +3,7 @@ members = [
     "crypto-ingestor",
     "canonicalizer",
     "analytics",
+    "macro-data",
 ]
 resolver = "2"
 
