@@ -6,7 +6,7 @@ use tokio_tungstenite::{accept_async, tungstenite::Message};
 
 use ingestor::agent::Agent;
 use ingestor::agents::{binance::BinanceAgent, coinbase::CoinbaseAgent};
-use ingestor::config::Settings;
+use ingestor::config::{Settings, DEFAULT_COINBASE_REFRESH_INTERVAL_MINS};
 
 #[tokio::test]
 async fn coinbase_trade_messages_are_canonicalized_with_id() {
@@ -37,7 +37,7 @@ async fn coinbase_trade_messages_are_canonicalized_with_id() {
         binance_refresh_interval_mins: 60,
         binance_max_reconnect_delay_secs: 1,
         coinbase_ws_url: format!("ws://{}", addr),
-        coinbase_refresh_interval_mins: 60,
+        coinbase_refresh_interval_mins: DEFAULT_COINBASE_REFRESH_INTERVAL_MINS,
         coinbase_max_reconnect_delay_secs: 1,
         ..Default::default()
     };
@@ -92,7 +92,7 @@ async fn binance_trade_messages_are_canonicalized_with_id() {
         binance_refresh_interval_mins: 60,
         binance_max_reconnect_delay_secs: 1,
         coinbase_ws_url: "ws://localhost".into(),
-        coinbase_refresh_interval_mins: 60,
+        coinbase_refresh_interval_mins: DEFAULT_COINBASE_REFRESH_INTERVAL_MINS,
         coinbase_max_reconnect_delay_secs: 1,
         ..Default::default()
     };

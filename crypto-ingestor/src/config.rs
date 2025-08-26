@@ -1,6 +1,9 @@
 use clap::Parser;
 use serde::Deserialize;
 
+/// Default refresh interval for the Coinbase websocket connection.
+pub const DEFAULT_COINBASE_REFRESH_INTERVAL_MINS: u64 = 60;
+
 /// Command line arguments
 #[derive(Parser, Debug, Clone)]
 #[command(author, version, about, long_about = None)]
@@ -59,7 +62,7 @@ impl Default for Settings {
             binance_refresh_interval_mins: 60,
             binance_max_reconnect_delay_secs: 30,
             coinbase_ws_url: String::new(),
-            coinbase_refresh_interval_mins: 60,
+            coinbase_refresh_interval_mins: DEFAULT_COINBASE_REFRESH_INTERVAL_MINS,
             coinbase_max_reconnect_delay_secs: 30,
             sink: default_sink(),
             kafka_brokers: None,
@@ -76,7 +79,10 @@ impl Settings {
             .set_default("binance_refresh_interval_mins", 60)?
             .set_default("binance_max_reconnect_delay_secs", 30)?
             .set_default("coinbase_ws_url", "wss://ws-feed.exchange.coinbase.com")?
-            .set_default("coinbase_refresh_interval_mins", 60)?
+            .set_default(
+                "coinbase_refresh_interval_mins",
+                DEFAULT_COINBASE_REFRESH_INTERVAL_MINS,
+            )?
             .set_default("coinbase_max_reconnect_delay_secs", 30)?
             .set_default("sink", "stdout")?
             .add_source(config::Environment::with_prefix("INGESTOR").separator("_"));
