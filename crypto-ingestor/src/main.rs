@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod http_client;
 mod metrics;
+mod parse;
 mod sink;
 
 use agents::{available_agents, make_agent};
