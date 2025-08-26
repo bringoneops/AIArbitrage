@@ -3,13 +3,15 @@
 Simple cryptocurrency data ingestor demonstrating async Rust agents. Both
 Binance and Coinbase agents stream market data via WebSockets.
 
-This repository is organised as a Cargo workspace containing two crates:
+This repository is organised as a Cargo workspace containing several crates:
 
 - `crypto-ingestor` – the main executable that spawns exchange agents.
 - `canonicalizer` – a standalone service crate providing a library and binary
   for converting exchange-specific symbols into a canonical `BASE-QUOTE` form.
 - `analytics` – consumes canonicalized trades, tracks latest prices per
   exchange and emits spread events.
+- `on-chain` – monitors DEX pools for liquidity changes and swaps and
+  cross-checks prices against Chainlink and Pyth oracles.
 
 ## Available agents
 
