@@ -1,5 +1,11 @@
 use std::collections::HashMap;
 
+pub mod defi_metrics;
+pub use defi_metrics::{
+    aggregate_pool_states, impact_cost, liquidity_curve, LiquidityPoint, PoolState,
+    ProtocolMetrics,
+};
+
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
