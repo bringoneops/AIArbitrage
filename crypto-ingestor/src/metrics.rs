@@ -16,6 +16,10 @@ pub static MESSAGES_INGESTED: Lazy<IntCounterVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!("errors_total", "Total number of errors", &["agent"]).unwrap()
+});
+
 pub static ACTIVE_CONNECTIONS: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
         "active_connections",

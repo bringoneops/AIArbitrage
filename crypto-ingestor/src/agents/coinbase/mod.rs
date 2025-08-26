@@ -10,7 +10,7 @@ use crate::{
     config::Settings,
     error::IngestorError,
     http_client,
-    metrics::{ACTIVE_CONNECTIONS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
+    metrics::{ACTIVE_CONNECTIONS, ERRORS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
 };
 use canonicalizer::CanonicalService;
 
