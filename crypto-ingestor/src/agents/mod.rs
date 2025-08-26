@@ -16,6 +16,7 @@ pub static AGENT_FACTORIES: Lazy<Mutex<HashMap<&'static str, Box<dyn AgentFactor
     Lazy::new(|| {
         let mut m: HashMap<&'static str, Box<dyn AgentFactory>> = HashMap::new();
         m.insert("binance", Box::new(binance::BinanceFactory));
+        m.insert("binance_options", Box::new(binance::options::BinanceOptionsFactory));
         m.insert("coinbase", Box::new(coinbase::CoinbaseFactory));
         Mutex::new(m)
     });
