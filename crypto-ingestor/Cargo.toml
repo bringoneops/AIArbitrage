@@ -16,6 +16,8 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt"] }
 chrono = "0.4"
 canonicalizer = { path = "../canonicalizer" }
+ntp = "0.4"
+time = "0.1"
 
 prometheus = "0.13"
 hyper = { version = "0.14", features = ["full"] }

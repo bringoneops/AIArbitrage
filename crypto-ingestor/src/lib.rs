@@ -6,3 +6,4 @@ pub mod http_client;
 pub mod metrics;
 pub mod parse;
 pub mod sink;
+pub mod clock;

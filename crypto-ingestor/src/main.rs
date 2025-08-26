@@ -6,6 +6,7 @@ mod http_client;
 mod metrics;
 mod parse;
 mod sink;
+mod clock;
 
 use agents::{available_agents, make_agent};
 use canonicalizer::CanonicalService;
@@ -43,6 +44,7 @@ async fn main() -> Result<(), IngestorError> {
 
     // metrics server
     tokio::spawn(metrics::serve(([0, 0, 0, 0], 9898).into()));
+    clock::spawn_clock_sync();
 
     // initialise output sink
     let sink: DynSink = match settings.sink.as_str() {
