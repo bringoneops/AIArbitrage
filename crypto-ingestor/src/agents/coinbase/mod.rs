@@ -1,5 +1,4 @@
 use futures_util::{SinkExt, StreamExt};
-use rust_decimal::Decimal;
 use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
@@ -10,7 +9,8 @@ use crate::{
     config::Settings,
     error::IngestorError,
     http_client,
-    metrics::{ACTIVE_CONNECTIONS, ERRORS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
+    metrics::{ACTIVE_CONNECTIONS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
+    parse::parse_decimal_str,
 };
 use canonicalizer::CanonicalService;
 
@@ -52,12 +52,6 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
         }
     }
     Ok(symbols)
-}
-
-fn parse_decimal_str(s: &str) -> Option<String> {
-    s.parse::<Decimal>()
-        .ok()
-        .map(|d| d.round_dp(28).normalize().to_string())
 }
 
 pub struct CoinbaseAgent {
