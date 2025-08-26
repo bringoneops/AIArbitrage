@@ -1,11 +1,24 @@
-/// Utilities for canonicalizing exchange-specific trading pairs.
-///
-/// The `CanonicalService` converts symbols from supported exchanges into a
-/// standard `BASE-QUOTE` format in uppercase. Binance symbols such as
-/// `btcusdt` are converted to `BTC-USDT`, while Coinbase symbols already in
-/// `BASE-QUOTE` form are normalized to uppercase.
-///
-/// Additional exchanges can be supported by extending `canonical_pair`.
+//! Utilities for canonicalizing exchange-specific trading pairs.
+//!
+//! The [`CanonicalService`] converts symbols from supported exchanges into a
+//! standard `BASE-QUOTE` format in uppercase. Binance symbols such as
+//! `btcusdt` are converted to `BTC-USDT`, while Coinbase symbols already in
+//! `BASE-QUOTE` form are normalized to uppercase.
+//!
+//! ## SSL Certificate Verification
+//!
+//! Requests to Binance's `exchangeInfo` endpoint use an HTTP client built by
+//! [`http_client::builder`]. Certificate verification is enabled by default.
+//! To accept invalid (e.g., self-signed) certificates during development, set
+//! the `BINANCE_ACCEPT_INVALID_CERTS` environment variable to a truthy value
+//! (`1`, `true`, `yes`). Disabling certificate verification is strongly
+//! discouraged for production use.
+//!
+//! Additional exchanges can be supported by extending
+//! [`CanonicalService::canonical_pair`].
+
+mod http_client;
+
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
@@ -63,9 +76,7 @@ impl CanonicalService {
     }
 
     async fn fetch_binance_quotes() -> Result<Vec<String>, reqwest::Error> {
-        let client = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .build()?;
+        let client = http_client::builder().build()?;
         let v: serde_json::Value = client
             .get("https://api.binance.us/api/v3/exchangeInfo")
             .send()
