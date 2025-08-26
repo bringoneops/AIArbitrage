@@ -3,6 +3,7 @@ use rust_decimal::Decimal;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
+use super::{shared_symbols, AgentFactory};
 use crate::{
     agent::Agent,
     config::Settings,
@@ -94,6 +95,31 @@ impl Agent for CoinbaseAgent {
         )
         .await;
         Ok(())
+    }
+}
+
+pub struct CoinbaseFactory;
+
+#[async_trait::async_trait]
+impl AgentFactory for CoinbaseFactory {
+    async fn create(&self, spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>> {
+        let symbols = if spec.is_empty() {
+            vec!["BTC-USD".to_string()]
+        } else if spec.eq_ignore_ascii_case("all") {
+            match shared_symbols().await {
+                Ok((_, c)) => c,
+                Err(e) => {
+                    tracing::error!(error=%e, "failed to fetch shared symbols");
+                    return None;
+                }
+            }
+        } else {
+            spec.split(',')
+                .map(|s| s.trim().to_uppercase())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        };
+        Some(Box::new(CoinbaseAgent::new(symbols, cfg)))
     }
 }
 
