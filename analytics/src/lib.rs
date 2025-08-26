@@ -5,6 +5,8 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 use tracing::info;
 
+pub mod orderbook;
+
 /// Trade record consumed by the analytics service.
 #[derive(Debug, Deserialize)]
 pub struct Trade {

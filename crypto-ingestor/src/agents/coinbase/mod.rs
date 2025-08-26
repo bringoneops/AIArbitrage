@@ -78,6 +78,11 @@ impl Agent for CoinbaseAgent {
         "coinbase"
     }
 
+    fn event_types(&self) -> Vec<crate::agent::EventType> {
+        use crate::agent::EventType::*;
+        vec![Trade, L2Diff, Snapshot, BookTicker]
+    }
+
     async fn run(
         &mut self,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -85,6 +90,7 @@ impl Agent for CoinbaseAgent {
     ) -> Result<(), IngestorError> {
         let mut handle = None;
         let mut sym_tx = None;
+        let mut snap_handles = Vec::new();
 
         if !self.symbols.is_empty() {
             let (s_tx, rx) = tokio::sync::watch::channel(self.symbols.clone());
@@ -96,6 +102,10 @@ impl Agent for CoinbaseAgent {
             handle = Some(tokio::spawn(async move {
                 connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
             }));
+            for sym in self.symbols.clone() {
+                let tx_snap = tx.clone();
+                snap_handles.push(tokio::spawn(async move { snapshot_task(sym, tx_snap).await; }));
+            }
         }
 
         let mut refresh = tokio::time::interval(std::time::Duration::from_secs(
@@ -154,6 +164,9 @@ impl Agent for CoinbaseAgent {
             drop(tx_sym);
         }
         if let Some(h) = handle {
+            let _ = h.await;
+        }
+        for h in snap_handles {
             let _ = h.await;
         }
 
@@ -257,47 +270,159 @@ async fn connection_task(
                                 Some(Ok(Message::Text(txt))) => {
                                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
                                         let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                                        if typ == "match" {
-                                            let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
-                                            let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
-                                            // Missing or non-positive trade IDs are represented as JSON null.
-                                            let trade_id = v
-                                                .get("trade_id")
-                                                .and_then(|id| id.as_i64())
-                                                .filter(|id| *id > 0);
-                                            let price = v
-                                                .get("price")
-                                                .and_then(|p| p.as_str())
-                                                .and_then(parse_decimal_str)
-                                                .unwrap_or_else(|| "?".to_string());
-                                            let size = v
-                                                .get("size")
-                                                .and_then(|q| q.as_str())
-                                                .and_then(parse_decimal_str)
-                                                .unwrap_or_else(|| "?".to_string());
-                                            let ts = v
-                                                .get("time")
-                                                .and_then(|t| t.as_str())
-                                                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                                                .map(|dt| dt.timestamp_millis())
-                                                .unwrap_or_default();
-                                            let line = serde_json::json!({
-                                                "agent": "coinbase",
-                                                "type": "trade",
-                                                "s": sym,
-                                                "t": trade_id,
-                                                "p": price,
-                                                "q": size,
-                                                "ts": ts
-                                            }).to_string();
-                                            if tx.send(line).await.is_ok() {
-                                                MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
-                                                LAST_TRADE_TIMESTAMP
-                                                    .with_label_values(&["coinbase"])
-                                                    .set(ts);
-                                            } else {
-                                                break;
+                                        match typ {
+                                            "match" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                // Missing or non-positive trade IDs are represented as JSON null.
+                                                let trade_id = v
+                                                    .get("trade_id")
+                                                    .and_then(|id| id.as_i64())
+                                                    .filter(|id| *id > 0);
+                                                let price = v
+                                                    .get("price")
+                                                    .and_then(|p| p.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let size = v
+                                                    .get("size")
+                                                    .and_then(|q| q.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let ts = v
+                                                    .get("time")
+                                                    .and_then(|t| t.as_str())
+                                                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                    .map(|dt| dt.timestamp_millis())
+                                                    .unwrap_or_default();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "trade",
+                                                    "s": sym,
+                                                    "t": trade_id,
+                                                    "p": price,
+                                                    "q": size,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                    LAST_TRADE_TIMESTAMP
+                                                        .with_label_values(&["coinbase"])
+                                                        .set(ts);
+                                                } else {
+                                                    break;
+                                                }
                                             }
+                                            "l2update" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let mut bids = Vec::new();
+                                                let mut asks = Vec::new();
+                                                if let Some(changes) = v.get("changes").and_then(|c| c.as_array()) {
+                                                    for c in changes {
+                                                        if let (Some(side), Some(p), Some(sz)) = (
+                                                            c.get(0).and_then(|s| s.as_str()),
+                                                            c.get(1).and_then(|p| p.as_str()),
+                                                            c.get(2).and_then(|q| q.as_str()),
+                                                        ) {
+                                                            let price = parse_decimal_str(p);
+                                                            let qty = parse_decimal_str(sz);
+                                                            if let (Some(price), Some(qty)) = (price, qty) {
+                                                                if side == "buy" {
+                                                                    bids.push([price, qty]);
+                                                                } else {
+                                                                    asks.push([price, qty]);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                let ts = v
+                                                    .get("time")
+                                                    .and_then(|t| t.as_str())
+                                                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                    .map(|dt| dt.timestamp_millis())
+                                                    .unwrap_or_default();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "l2_diff",
+                                                    "s": sym,
+                                                    "bids": bids,
+                                                    "asks": asks,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                } else { break; }
+                                            }
+                                            "snapshot" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let bids = v
+                                                    .get("bids")
+                                                    .and_then(|b| b.as_array())
+                                                    .cloned()
+                                                    .unwrap_or_default()
+                                                    .into_iter()
+                                                    .filter_map(|lvl| {
+                                                        let p = lvl.get(0)?.as_str()?.to_string();
+                                                        let q = lvl.get(1)?.as_str()?.to_string();
+                                                        Some([p, q])
+                                                    })
+                                                    .collect::<Vec<[String;2]>>();
+                                                let asks = v
+                                                    .get("asks")
+                                                    .and_then(|a| a.as_array())
+                                                    .cloned()
+                                                    .unwrap_or_default()
+                                                    .into_iter()
+                                                    .filter_map(|lvl| {
+                                                        let p = lvl.get(0)?.as_str()?.to_string();
+                                                        let q = lvl.get(1)?.as_str()?.to_string();
+                                                        Some([p, q])
+                                                    })
+                                                    .collect::<Vec<[String;2]>>();
+                                                let ts = chrono::Utc::now().timestamp_millis();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "snapshot",
+                                                    "s": sym,
+                                                    "bids": bids,
+                                                    "asks": asks,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                } else { break; }
+                                            }
+                                            "ticker" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let bid_px = v.get("best_bid").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                let bid_qty = v.get("best_bid_size").and_then(|q| q.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                let ask_px = v.get("best_ask").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                let ask_qty = v.get("best_ask_size").and_then(|q| q.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                let ts = v
+                                                    .get("time")
+                                                    .and_then(|t| t.as_str())
+                                                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                    .map(|dt| dt.timestamp_millis())
+                                                    .unwrap_or_default();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "book_ticker",
+                                                    "s": sym,
+                                                    "bp": bid_px,
+                                                    "bq": bid_qty,
+                                                    "ap": ask_px,
+                                                    "aq": ask_qty,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                } else { break; }
+                                            }
+                                            _ => {}
                                         }
                                     } else {
                                         tracing::warn!("non-json text msg");
@@ -348,7 +473,7 @@ async fn send_subscribe(
     let msg = serde_json::json!({
         "type": "subscribe",
         "product_ids": symbols,
-        "channels": ["matches"],
+        "channels": ["matches", "level2", "ticker"],
     });
     ws.send(Message::Text(msg.to_string())).await
 }
@@ -363,7 +488,73 @@ async fn send_unsubscribe(
     let msg = serde_json::json!({
         "type": "unsubscribe",
         "product_ids": symbols,
-        "channels": ["matches"],
+        "channels": ["matches", "level2", "ticker"],
     });
     ws.send(Message::Text(msg.to_string())).await
+}
+
+async fn snapshot_task(symbol: String, tx: mpsc::Sender<String>) {
+    let client = match http_client::builder().build() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(error=%e, "coinbase snapshot http client");
+            return;
+        }
+    };
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    loop {
+        let url = format!(
+            "https://api.exchange.coinbase.com/products/{}/book?level=2",
+            symbol
+        );
+        match client.get(&url).send().await {
+            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                Ok(v) => {
+                let bids = v
+                    .get("bids")
+                    .and_then(|b| b.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|lvl| {
+                        let p = lvl.get(0)?.as_str()?.to_string();
+                        let q = lvl.get(1)?.as_str()?.to_string();
+                        Some([p, q])
+                    })
+                    .collect::<Vec<[String;2]>>();
+                let asks = v
+                    .get("asks")
+                    .and_then(|a| a.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|lvl| {
+                        let p = lvl.get(0)?.as_str()?.to_string();
+                        let q = lvl.get(1)?.as_str()?.to_string();
+                        Some([p, q])
+                    })
+                    .collect::<Vec<[String;2]>>();
+                let sym = CanonicalService::canonical_pair("coinbase", &symbol)
+                    .unwrap_or_else(|| symbol.clone());
+                let ts = chrono::Utc::now().timestamp_millis();
+                let line = serde_json::json!({
+                    "agent": "coinbase",
+                    "type": "snapshot",
+                    "s": sym,
+                    "bids": bids,
+                    "asks": asks,
+                    "ts": ts
+                }).to_string();
+                let _ = tx.send(line).await;
+            }
+                Err(e) => {
+                    tracing::error!(error=%e, symbol=%symbol, "snapshot parse failed");
+                }
+            },
+            Err(e) => {
+                tracing::error!(error=%e, symbol=%symbol, "snapshot failed");
+            }
+        }
+        interval.tick().await;
+    }
 }
