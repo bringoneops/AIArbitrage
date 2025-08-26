@@ -59,6 +59,7 @@ impl Default for Settings {
             binance_refresh_interval_mins: 60,
             binance_max_reconnect_delay_secs: 30,
             coinbase_ws_url: String::new(),
+            coinbase_refresh_interval_mins: 60,
             coinbase_max_reconnect_delay_secs: 30,
             sink: default_sink(),
             kafka_brokers: None,
