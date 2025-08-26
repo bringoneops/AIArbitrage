@@ -20,10 +20,6 @@ pub static AGENT_FACTORIES: Lazy<Mutex<HashMap<&'static str, Box<dyn AgentFactor
         Mutex::new(m)
     });
 
-pub fn register_agent(name: &'static str, factory: Box<dyn AgentFactory>) {
-    AGENT_FACTORIES.lock().unwrap().insert(name, factory);
-}
-
 async fn shared_symbols() -> Result<(Vec<String>, Vec<String>), IngestorError> {
     // Ensure that the canonicalizer has loaded the quote asset list before we
     // attempt any symbol comparisons.
