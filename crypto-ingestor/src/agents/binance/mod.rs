@@ -8,7 +8,11 @@ use crate::{
     config::Settings,
     error::IngestorError,
     http_client,
-    metrics::{ACTIVE_CONNECTIONS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
+    metrics::{
+        ACTIVE_CONNECTIONS, LAST_FUNDING_TIMESTAMP, LAST_LIQUIDATION_TIMESTAMP,
+        LAST_MARK_PRICE_TIMESTAMP, LAST_OPEN_INTEREST_TIMESTAMP, LAST_TERM_TIMESTAMP,
+        LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED,
+    },
     parse::parse_decimal_str,
 };
 
@@ -120,6 +124,38 @@ impl Agent for BinanceAgent {
                 connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
             }));
         }
+
+        // additional aggregated streams not tied to symbol subsets
+        let shutdown_clone = shutdown.clone();
+        let tx_clone = out_tx.clone();
+        handles.push(tokio::spawn(async move {
+            mark_price_task(shutdown_clone, tx_clone).await;
+        }));
+
+        let shutdown_clone = shutdown.clone();
+        let tx_clone = out_tx.clone();
+        handles.push(tokio::spawn(async move {
+            funding_rate_task(shutdown_clone, tx_clone).await;
+        }));
+
+        let shutdown_clone = shutdown.clone();
+        let tx_clone = out_tx.clone();
+        handles.push(tokio::spawn(async move {
+            open_interest_task(shutdown_clone, tx_clone).await;
+        }));
+
+        let shutdown_clone = shutdown.clone();
+        let tx_clone = out_tx.clone();
+        handles.push(tokio::spawn(async move {
+            liquidation_task(shutdown_clone, tx_clone).await;
+        }));
+
+        let symbols_clone = self.symbols.clone();
+        let shutdown_clone = shutdown.clone();
+        let tx_clone = out_tx.clone();
+        handles.push(tokio::spawn(async move {
+            term_structure_task(symbols_clone, shutdown_clone, tx_clone).await;
+        }));
 
         let mut refresh = tokio::time::interval(std::time::Duration::from_secs(
             60 * self.refresh_interval_mins,
@@ -414,4 +450,249 @@ async fn send_unsubscribe(
         "id": 1,
     });
     ws.send(Message::Text(msg.to_string())).await
+}
+
+async fn mark_price_task(shutdown: tokio::sync::watch::Receiver<bool>, tx: mpsc::Sender<String>) {
+    let url = "wss://fstream.binance.com/stream?streams=!markPrice@arr";
+    aggregated_ws_loop(url, "mark_price", shutdown, tx, |item| {
+        let raw = item.get("s").and_then(|s| s.as_str()).unwrap_or("?");
+        let sym =
+            CanonicalService::canonical_pair("binance", raw).unwrap_or_else(|| raw.to_string());
+        let price = item
+            .get("p")
+            .and_then(|p| p.as_str())
+            .and_then(parse_decimal_str)
+            .unwrap_or_else(|| "?".to_string());
+        let ts = item.get("E").and_then(|x| x.as_i64()).unwrap_or_default();
+        let line = serde_json::json!({
+            "agent": "binance",
+            "type": "mark_price",
+            "s": sym,
+            "p": price,
+            "ts": ts
+        })
+        .to_string();
+        (line, ts)
+    })
+    .await;
+}
+
+async fn funding_rate_task(shutdown: tokio::sync::watch::Receiver<bool>, tx: mpsc::Sender<String>) {
+    let url = "wss://fstream.binance.com/stream?streams=!fundingRate@arr";
+    aggregated_ws_loop(url, "funding", shutdown, tx, |item| {
+        let raw = item.get("s").and_then(|s| s.as_str()).unwrap_or("?");
+        let sym =
+            CanonicalService::canonical_pair("binance", raw).unwrap_or_else(|| raw.to_string());
+        let rate = item
+            .get("r")
+            .and_then(|p| p.as_str())
+            .and_then(parse_decimal_str)
+            .unwrap_or_else(|| "?".to_string());
+        let ts = item.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
+        let line = serde_json::json!({
+            "agent": "binance",
+            "type": "funding",
+            "s": sym,
+            "r": rate,
+            "ts": ts
+        })
+        .to_string();
+        (line, ts)
+    })
+    .await;
+}
+
+async fn open_interest_task(
+    shutdown: tokio::sync::watch::Receiver<bool>,
+    tx: mpsc::Sender<String>,
+) {
+    let url = "wss://fstream.binance.com/stream?streams=!openInterest@arr";
+    aggregated_ws_loop(url, "open_interest", shutdown, tx, |item| {
+        let raw = item.get("s").and_then(|s| s.as_str()).unwrap_or("?");
+        let sym =
+            CanonicalService::canonical_pair("binance", raw).unwrap_or_else(|| raw.to_string());
+        let oi = item
+            .get("oi")
+            .and_then(|p| p.as_str())
+            .and_then(parse_decimal_str)
+            .unwrap_or_else(|| "?".to_string());
+        let ts = item.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
+        let line = serde_json::json!({
+            "agent": "binance",
+            "type": "open_interest",
+            "s": sym,
+            "oi": oi,
+            "ts": ts
+        })
+        .to_string();
+        (line, ts)
+    })
+    .await;
+}
+
+async fn liquidation_task(shutdown: tokio::sync::watch::Receiver<bool>, tx: mpsc::Sender<String>) {
+    let url = "wss://fstream.binance.com/stream?streams=!forceOrder@arr";
+    aggregated_ws_loop(url, "liquidation", shutdown, tx, |item| {
+        let raw = item.get("s").and_then(|s| s.as_str()).unwrap_or("?");
+        let sym =
+            CanonicalService::canonical_pair("binance", raw).unwrap_or_else(|| raw.to_string());
+        let o = item.get("o").and_then(|o| o.as_object());
+        let price = o
+            .and_then(|m| m.get("p"))
+            .and_then(|p| p.as_str())
+            .and_then(parse_decimal_str)
+            .unwrap_or_else(|| "?".to_string());
+        let qty = o
+            .and_then(|m| m.get("q"))
+            .and_then(|p| p.as_str())
+            .and_then(parse_decimal_str)
+            .unwrap_or_else(|| "?".to_string());
+        let side = o
+            .and_then(|m| m.get("S"))
+            .and_then(|s| s.as_str())
+            .unwrap_or("?")
+            .to_string();
+        let ts = item.get("E").and_then(|x| x.as_i64()).unwrap_or_default();
+        let line = serde_json::json!({
+            "agent": "binance",
+            "type": "liquidation",
+            "s": sym,
+            "p": price,
+            "q": qty,
+            "side": side,
+            "ts": ts
+        })
+        .to_string();
+        (line, ts)
+    })
+    .await;
+}
+
+async fn term_structure_task(
+    symbols: Vec<String>,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    tx: mpsc::Sender<String>,
+) {
+    let client = match http_client::builder().build() {
+        Ok(c) => c,
+        Err(_) => return,
+    };
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    loop {
+        tokio::select! {
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() { break; }
+            }
+            _ = interval.tick() => {
+                for sym in &symbols {
+                    let url = format!("https://fapi.binance.com/futures/data/basis?symbol={}&period=5m&limit=1", sym.to_uppercase());
+                    if let Ok(resp) = client.get(&url).send().await {
+                        if let Ok(resp) = resp.json::<serde_json::Value>().await {
+                            if let Some(arr) = resp.as_array().and_then(|a| a.first()) {
+                                let raw = arr.get("symbol").and_then(|s| s.as_str()).unwrap_or("?");
+                                let canon = CanonicalService::canonical_pair("binance", raw).unwrap_or_else(|| raw.to_string());
+                                let basis = arr
+                                    .get("basis")
+                                    .and_then(|b| b.as_str())
+                                    .and_then(parse_decimal_str)
+                                    .unwrap_or_else(|| "?".to_string());
+                                let ts = arr.get("timestamp").and_then(|t| t.as_i64()).unwrap_or_default();
+                                let line = serde_json::json!({
+                                    "agent": "binance",
+                                    "type": "term",
+                                    "s": canon,
+                                    "b": basis,
+                                    "ts": ts
+                                }).to_string();
+                                let _ = tx.send(line).await;
+                                MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
+                                LAST_TERM_TIMESTAMP.with_label_values(&["binance"]).set(ts);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+async fn aggregated_ws_loop<F>(
+    url: &str,
+    metric: &str,
+    mut shutdown: tokio::sync::watch::Receiver<bool>,
+    tx: mpsc::Sender<String>,
+    mut build: F,
+) where
+    F: FnMut(&serde_json::Value) -> (String, i64),
+{
+    let mut attempt: u32 = 0;
+    loop {
+        if *shutdown.borrow() {
+            break;
+        }
+        tracing::info!(%url, "connecting");
+        match connect_async(url).await {
+            Ok((mut ws, _)) => {
+                ACTIVE_CONNECTIONS.with_label_values(&["binance"]).inc();
+                attempt = 0;
+                loop {
+                    tokio::select! {
+                        _ = shutdown.changed() => {
+                            if *shutdown.borrow() {
+                                let _ = ws.close(None).await;
+                                ACTIVE_CONNECTIONS.with_label_values(&["binance"]).dec();
+                                return;
+                            }
+                        }
+                        msg = ws.next() => {
+                            match msg {
+                                Some(Ok(Message::Text(txt))) => {
+                                    if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
+                                        if let Some(arr) = v.get("data").and_then(|d| d.as_array()) {
+                                            for item in arr {
+                                                let (line, ts) = build(item);
+                                                if tx.send(line).await.is_ok() {
+                                                    MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
+                                                    match metric {
+                                                        "mark_price" => LAST_MARK_PRICE_TIMESTAMP.with_label_values(&["binance"]).set(ts),
+                                                        "funding" => LAST_FUNDING_TIMESTAMP.with_label_values(&["binance"]).set(ts),
+                                                        "open_interest" => LAST_OPEN_INTEREST_TIMESTAMP.with_label_values(&["binance"]).set(ts),
+                                                        "liquidation" => LAST_LIQUIDATION_TIMESTAMP.with_label_values(&["binance"]).set(ts),
+                                                        _ => {}
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; }
+                                Some(Ok(Message::Close(_))) => { break; }
+                                Some(Ok(_)) => {}
+                                Some(Err(e)) => { tracing::error!(error=%e, "ws error"); break; }
+                                None => { break; }
+                            }
+                        }
+                    }
+                }
+                ACTIVE_CONNECTIONS.with_label_values(&["binance"]).dec();
+            }
+            Err(e) => {
+                tracing::error!(error=%e, "connect failed");
+            }
+        }
+
+        attempt = attempt.saturating_add(1);
+        let exp: u32 = attempt.saturating_sub(1).min(4);
+        let delay = (1u64 << exp).min(16);
+        let sleep = std::time::Duration::from_secs(delay);
+        tracing::info!(?sleep, "reconnecting");
+        tokio::select! {
+            _ = tokio::time::sleep(sleep) => {},
+            _ = shutdown.changed() => {
+                if *shutdown.borrow() {
+                    break;
+                }
+            }
+        }
+    }
 }

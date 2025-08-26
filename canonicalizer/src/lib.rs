@@ -17,6 +17,7 @@
 //! Additional exchanges can be supported by extending
 //! [`CanonicalService::canonical_pair`].
 
+pub mod events;
 mod http_client;
 
 use std::collections::HashSet;
