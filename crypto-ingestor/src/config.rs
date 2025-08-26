@@ -9,6 +9,22 @@ pub struct Cli {
     #[arg(short, long)]
     pub config: Option<String>,
 
+    /// Output sink type (stdout, kafka, file)
+    #[arg(long, default_value = "stdout")]
+    pub sink: String,
+
+    /// Kafka broker list
+    #[arg(long)]
+    pub kafka_brokers: Option<String>,
+
+    /// Kafka topic
+    #[arg(long)]
+    pub kafka_topic: Option<String>,
+
+    /// Output file path
+    #[arg(long)]
+    pub file_path: Option<String>,
+
     /// Agent specifications (e.g. binance:btcusdt)
     pub specs: Vec<String>,
 }
@@ -21,6 +37,34 @@ pub struct Settings {
     pub binance_max_reconnect_delay_secs: u64,
     pub coinbase_ws_url: String,
     pub coinbase_max_reconnect_delay_secs: u64,
+    #[serde(default = "default_sink")]
+    pub sink: String,
+    #[serde(default)]
+    pub kafka_brokers: Option<String>,
+    #[serde(default)]
+    pub kafka_topic: Option<String>,
+    #[serde(default)]
+    pub file_path: Option<String>,
+}
+
+fn default_sink() -> String {
+    "stdout".into()
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            binance_ws_url: String::new(),
+            binance_refresh_interval_mins: 60,
+            binance_max_reconnect_delay_secs: 30,
+            coinbase_ws_url: String::new(),
+            coinbase_max_reconnect_delay_secs: 30,
+            sink: default_sink(),
+            kafka_brokers: None,
+            kafka_topic: None,
+            file_path: None,
+        }
+    }
 }
 
 impl Settings {
@@ -31,11 +75,23 @@ impl Settings {
             .set_default("binance_max_reconnect_delay_secs", 30)?
             .set_default("coinbase_ws_url", "wss://ws-feed.exchange.coinbase.com")?
             .set_default("coinbase_max_reconnect_delay_secs", 30)?
+            .set_default("sink", "stdout")?
             .add_source(config::Environment::with_prefix("INGESTOR").separator("_"));
         if let Some(path) = &cli.config {
             builder = builder.add_source(config::File::with_name(path));
         }
         let cfg = builder.build()?;
-        cfg.try_deserialize()
+        let mut settings: Settings = cfg.try_deserialize()?;
+        settings.sink = cli.sink.clone();
+        if let Some(b) = &cli.kafka_brokers {
+            settings.kafka_brokers = Some(b.clone());
+        }
+        if let Some(t) = &cli.kafka_topic {
+            settings.kafka_topic = Some(t.clone());
+        }
+        if let Some(p) = &cli.file_path {
+            settings.file_path = Some(p.clone());
+        }
+        Ok(settings)
     }
 }

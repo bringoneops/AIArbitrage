@@ -38,6 +38,7 @@ async fn coinbase_trade_messages_are_canonicalized_with_id() {
         binance_max_reconnect_delay_secs: 1,
         coinbase_ws_url: format!("ws://{}", addr),
         coinbase_max_reconnect_delay_secs: 1,
+        ..Default::default()
     };
 
     let mut agent = CoinbaseAgent::new(vec!["ETH-USD".into()], &cfg);
@@ -91,6 +92,7 @@ async fn binance_trade_messages_are_canonicalized_with_id() {
         binance_max_reconnect_delay_secs: 1,
         coinbase_ws_url: "ws://localhost".into(),
         coinbase_max_reconnect_delay_secs: 1,
+        ..Default::default()
     };
 
     let mut agent = BinanceAgent::new(Some(vec!["btcusdt".into()]), &cfg)
