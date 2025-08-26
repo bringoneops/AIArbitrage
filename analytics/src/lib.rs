@@ -40,21 +40,24 @@ pub fn spawn(threshold: f64) -> (mpsc::Sender<Trade>, broadcast::Receiver<Spread
         let mut prices: HashMap<String, HashMap<String, f64>> = HashMap::new();
 
         while let Some(trade) = rx.recv().await {
-            if let Ok(price) = trade.price.parse::<f64>() {
-                let sym = trade.symbol.clone();
-                let exch = trade.agent.clone();
+            let Trade {
+                agent: exch,
+                symbol: sym,
+                price: price_str,
+            } = trade;
+            if let Ok(price) = price_str.parse::<f64>() {
                 let entry = prices.entry(sym.clone()).or_default();
-                entry.insert(exch.clone(), price);
+                entry.insert(exch, price);
 
                 if entry.len() >= 2 {
-                    let mut best_buy: Option<(String, f64)> = None;
-                    let mut best_sell: Option<(String, f64)> = None;
+                    let mut best_buy: Option<(&String, f64)> = None;
+                    let mut best_sell: Option<(&String, f64)> = None;
                     for (e, p) in entry.iter() {
                         if best_buy.as_ref().map_or(true, |(_, bp)| p < bp) {
-                            best_buy = Some((e.clone(), *p));
+                            best_buy = Some((e, *p));
                         }
                         if best_sell.as_ref().map_or(true, |(_, sp)| p > sp) {
-                            best_sell = Some((e.clone(), *p));
+                            best_sell = Some((e, *p));
                         }
                     }
                     if let (Some((buy_ex, buy_p)), Some((sell_ex, sell_p))) = (best_buy, best_sell)
@@ -62,9 +65,9 @@ pub fn spawn(threshold: f64) -> (mpsc::Sender<Trade>, broadcast::Receiver<Spread
                         let spread = sell_p - buy_p;
                         if spread >= threshold {
                             let event = SpreadEvent {
-                                symbol: sym.clone(),
-                                buy_exchange: buy_ex,
-                                sell_exchange: sell_ex,
+                                symbol: sym,
+                                buy_exchange: buy_ex.clone(),
+                                sell_exchange: sell_ex.clone(),
                                 spread,
                                 timestamp: Utc::now().timestamp_millis(),
                             };
