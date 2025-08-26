@@ -1,5 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
@@ -9,9 +9,14 @@ use crate::{
     config::Settings,
     error::IngestorError,
     http_client,
-    metrics::{ACTIVE_CONNECTIONS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
+    metrics::{
+        ACTIVE_CONNECTIONS, BACKOFF_SECS, BACKPRESSURE, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED,
+        RECONNECTS, STREAM_DROPS, STREAM_LATENCY_MS, STREAM_SEQ_GAPS, STREAM_THROUGHPUT,
+        VALIDATION_ERRORS,
+    },
     parse::parse_decimal_str,
 };
+use crate::clock;
 use canonicalizer::CanonicalService;
 
 /// Fetch all tradable USD product IDs from Coinbase.
@@ -80,6 +85,11 @@ impl Agent for CoinbaseAgent {
         "coinbase"
     }
 
+    fn event_types(&self) -> Vec<crate::agent::EventType> {
+        use crate::agent::EventType::*;
+        vec![Trade, L2Diff, Snapshot, BookTicker]
+    }
+
     async fn run(
         &mut self,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -87,6 +97,7 @@ impl Agent for CoinbaseAgent {
     ) -> Result<(), IngestorError> {
         let mut handle = None;
         let mut sym_tx = None;
+        let mut snap_handles = Vec::new();
 
         if !self.symbols.is_empty() {
             let (s_tx, rx) = tokio::sync::watch::channel(self.symbols.clone());
@@ -99,6 +110,10 @@ impl Agent for CoinbaseAgent {
             handle = Some(tokio::spawn(async move {
                 connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay, intervals).await;
             }));
+            for sym in self.symbols.clone() {
+                let tx_snap = tx.clone();
+                snap_handles.push(tokio::spawn(async move { snapshot_task(sym, tx_snap).await; }));
+            }
         }
 
         let mut refresh = tokio::time::interval(std::time::Duration::from_secs(
@@ -160,6 +175,9 @@ impl Agent for CoinbaseAgent {
         if let Some(h) = handle {
             let _ = h.await;
         }
+        for h in snap_handles {
+            let _ = h.await;
+        }
 
         Ok(())
     }
@@ -199,6 +217,7 @@ async fn connection_task(
     intervals: Vec<String>,
 ) {
     let mut attempt: u32 = 0;
+    let mut last_trade_ids: HashMap<String, i64> = HashMap::new();
 
     loop {
         if *shutdown.borrow() {
@@ -266,6 +285,7 @@ async fn connection_task(
                                             "match" => {
                                                 let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
                                                 let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                // Missing or non-positive trade IDs are represented as JSON null.
                                                 let trade_id = v
                                                     .get("trade_id")
                                                     .and_then(|id| id.as_i64())
@@ -303,6 +323,165 @@ async fn connection_task(
                                                 } else {
                                                     break;
                                                 }
+                                        if typ == "match" {
+                                            let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                            let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                            // Missing or non-positive trade IDs are represented as JSON null.
+                                            let trade_id = v
+                                                .get("trade_id")
+                                                .and_then(|id| id.as_i64())
+                                                .filter(|id| *id > 0);
+                                            if let Some(id) = trade_id {
+                                                if let Some(last) = last_trade_ids.get_mut(&sym) {
+                                                    if id > *last + 1 {
+                                                        STREAM_SEQ_GAPS.with_label_values(&["coinbase", &sym]).inc_by((id - *last - 1) as u64);
+                                                    }
+                                                    *last = id;
+                                                } else {
+                                                    last_trade_ids.insert(sym.clone(), id);
+                                                }
+                                            }
+                                            let price = match v
+                                                .get("price")
+                                                .and_then(|p| p.as_str())
+                                                .and_then(parse_decimal_str)
+                                            {
+                                                Some(p) => p,
+                                                None => {
+                                                    VALIDATION_ERRORS.with_label_values(&["coinbase"]).inc();
+                                                    "?".to_string()
+                                                }
+                                            };
+                                            let size = match v
+                                                .get("size")
+                                                .and_then(|q| q.as_str())
+                                                .and_then(parse_decimal_str)
+                                            {
+                                                Some(q) => q,
+                                                None => {
+                                                    VALIDATION_ERRORS.with_label_values(&["coinbase"]).inc();
+                                                    "?".to_string()
+                                                }
+                                            };
+                                            let ts = v
+                                                .get("time")
+                                                .and_then(|t| t.as_str())
+                                                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                .map(|dt| dt.timestamp_millis())
+                                                .unwrap_or_default();
+                                            let now = chrono::Utc::now().timestamp_millis();
+                                            STREAM_LATENCY_MS
+                                                .with_label_values(&["coinbase", &sym])
+                                                .set(now - ts);
+                                            let skew = clock::current_skew_ms();
+                                            let line = serde_json::json!({
+                                                "agent": "coinbase",
+                                                "type": "trade",
+                                                "s": sym,
+                                                "t": trade_id,
+                                                "p": price,
+                                                "q": size,
+                                                "ts": ts,
+                                                "skew": skew
+                                            }).to_string();
+                                            let backlog = tx.max_capacity() - tx.capacity();
+                                            BACKPRESSURE
+                                                .with_label_values(&["coinbase", &sym])
+                                                .set(backlog as i64);
+                                            match tx.send(line).await {
+                                                Ok(()) => {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                    STREAM_THROUGHPUT.with_label_values(&["coinbase", &sym]).inc();
+                                                    LAST_TRADE_TIMESTAMP
+                                                        .with_label_values(&["coinbase"])
+                                                        .set(ts);
+                                                }
+                                                Err(_) => {
+                                                    STREAM_DROPS.with_label_values(&["coinbase", &sym]).inc();
+                                                    break;
+                                                }
+                                            }
+                                            "l2update" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let mut bids = Vec::new();
+                                                let mut asks = Vec::new();
+                                                if let Some(changes) = v.get("changes").and_then(|c| c.as_array()) {
+                                                    for c in changes {
+                                                        if let (Some(side), Some(p), Some(sz)) = (
+                                                            c.get(0).and_then(|s| s.as_str()),
+                                                            c.get(1).and_then(|p| p.as_str()),
+                                                            c.get(2).and_then(|q| q.as_str()),
+                                                        ) {
+                                                            let price = parse_decimal_str(p);
+                                                            let qty = parse_decimal_str(sz);
+                                                            if let (Some(price), Some(qty)) = (price, qty) {
+                                                                if side == "buy" {
+                                                                    bids.push([price, qty]);
+                                                                } else {
+                                                                    asks.push([price, qty]);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                let ts = v
+                                                    .get("time")
+                                                    .and_then(|t| t.as_str())
+                                                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                    .map(|dt| dt.timestamp_millis())
+                                                    .unwrap_or_default();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "l2_diff",
+                                                    "s": sym,
+                                                    "bids": bids,
+                                                    "asks": asks,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                } else { break; }
+                                            }
+                                            "snapshot" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let bids = v
+                                                    .get("bids")
+                                                    .and_then(|b| b.as_array())
+                                                    .cloned()
+                                                    .unwrap_or_default()
+                                                    .into_iter()
+                                                    .filter_map(|lvl| {
+                                                        let p = lvl.get(0)?.as_str()?.to_string();
+                                                        let q = lvl.get(1)?.as_str()?.to_string();
+                                                        Some([p, q])
+                                                    })
+                                                    .collect::<Vec<[String;2]>>();
+                                                let asks = v
+                                                    .get("asks")
+                                                    .and_then(|a| a.as_array())
+                                                    .cloned()
+                                                    .unwrap_or_default()
+                                                    .into_iter()
+                                                    .filter_map(|lvl| {
+                                                        let p = lvl.get(0)?.as_str()?.to_string();
+                                                        let q = lvl.get(1)?.as_str()?.to_string();
+                                                        Some([p, q])
+                                                    })
+                                                    .collect::<Vec<[String;2]>>();
+                                                let ts = chrono::Utc::now().timestamp_millis();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "snapshot",
+                                                    "s": sym,
+                                                    "bids": bids,
+                                                    "asks": asks,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                } else { break; }
                                             }
                                             "ticker" => {
                                                 let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
@@ -317,6 +496,10 @@ async fn connection_task(
                                                     .and_then(|p| p.as_str())
                                                     .and_then(parse_decimal_str)
                                                     .unwrap_or_else(|| "?".to_string());
+                                                let bid_px = v.get("best_bid").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                let bid_qty = v.get("best_bid_size").and_then(|q| q.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                let ask_px = v.get("best_ask").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
+                                                let ask_qty = v.get("best_ask_size").and_then(|q| q.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
                                                 let ts = v
                                                     .get("time")
                                                     .and_then(|t| t.as_str())
@@ -329,6 +512,12 @@ async fn connection_task(
                                                     "s": sym,
                                                     "p": price,
                                                     "v": vol,
+                                                    "type": "book_ticker",
+                                                    "s": sym,
+                                                    "bp": bid_px,
+                                                    "bq": bid_qty,
+                                                    "ap": ask_px,
+                                                    "aq": ask_qty,
                                                     "ts": ts
                                                 }).to_string();
                                                 if tx.send(line).await.is_ok() {
@@ -366,11 +555,14 @@ async fn connection_task(
                                                         break;
                                                     }
                                                 }
+                                                } else { break; }
                                             }
                                             _ => {}
                                         }
                                     } else {
                                     tracing::warn!("non-json text msg");
+                                        VALIDATION_ERRORS.with_label_values(&["coinbase"]).inc();
+                                        tracing::warn!("non-json text msg");
                                     }
                                 }
                                 Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; }
@@ -399,6 +591,10 @@ async fn connection_task(
         let sleep = std::time::Duration::from_secs(delay);
 
         tracing::info!(?sleep, "reconnecting");
+        RECONNECTS.with_label_values(&["coinbase"]).inc();
+        BACKOFF_SECS
+            .with_label_values(&["coinbase"])
+            .inc_by(delay);
         tokio::select! {
             _ = tokio::time::sleep(sleep) => {},
             _ = shutdown.changed() => {
@@ -424,6 +620,7 @@ async fn send_subscribe(
         "type": "subscribe",
         "product_ids": symbols,
         "channels": channels,
+        "channels": ["matches", "level2", "ticker"],
     });
     ws.send(Message::Text(msg.to_string())).await
 }
@@ -444,6 +641,73 @@ async fn send_unsubscribe(
         "type": "unsubscribe",
         "product_ids": symbols,
         "channels": channels,
+        "channels": ["matches", "level2", "ticker"],
     });
     ws.send(Message::Text(msg.to_string())).await
+}
+
+async fn snapshot_task(symbol: String, tx: mpsc::Sender<String>) {
+    let client = match http_client::builder().build() {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::error!(error=%e, "coinbase snapshot http client");
+            return;
+        }
+    };
+    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
+    loop {
+        let url = format!(
+            "https://api.exchange.coinbase.com/products/{}/book?level=2",
+            symbol
+        );
+        match client.get(&url).send().await {
+            Ok(resp) => match resp.json::<serde_json::Value>().await {
+                Ok(v) => {
+                let bids = v
+                    .get("bids")
+                    .and_then(|b| b.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|lvl| {
+                        let p = lvl.get(0)?.as_str()?.to_string();
+                        let q = lvl.get(1)?.as_str()?.to_string();
+                        Some([p, q])
+                    })
+                    .collect::<Vec<[String;2]>>();
+                let asks = v
+                    .get("asks")
+                    .and_then(|a| a.as_array())
+                    .cloned()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .filter_map(|lvl| {
+                        let p = lvl.get(0)?.as_str()?.to_string();
+                        let q = lvl.get(1)?.as_str()?.to_string();
+                        Some([p, q])
+                    })
+                    .collect::<Vec<[String;2]>>();
+                let sym = CanonicalService::canonical_pair("coinbase", &symbol)
+                    .unwrap_or_else(|| symbol.clone());
+                let ts = chrono::Utc::now().timestamp_millis();
+                let line = serde_json::json!({
+                    "agent": "coinbase",
+                    "type": "snapshot",
+                    "s": sym,
+                    "bids": bids,
+                    "asks": asks,
+                    "ts": ts
+                }).to_string();
+                let _ = tx.send(line).await;
+            }
+                Err(e) => {
+                    tracing::error!(error=%e, symbol=%symbol, "snapshot parse failed");
+                }
+            },
+            Err(e) => {
+                tracing::error!(error=%e, symbol=%symbol, "snapshot failed");
+            }
+        }
+        interval.tick().await;
+    }
 }

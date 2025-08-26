@@ -17,13 +17,19 @@
 //! Additional exchanges can be supported by extending
 //! [`CanonicalService::canonical_pair`].
 
+pub mod events;
 mod http_client;
+pub mod events;
+
+pub use events::{OptionChain, OptionGreeks, OptionQuote};
+pub mod onchain;
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
+use serde::{Serialize, Deserialize};
 
 /// Canonicalized candle event.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -204,6 +210,70 @@ impl CanonicalService {
         let mut qs: Vec<String> = quotes.into_iter().map(|s| s.to_lowercase()).collect();
         qs.sort_by(|a, b| b.len().cmp(&a.len()));
         let _ = BINANCE_QUOTES.set(qs);
+    }
+}
+
+/// Canonical representation of an incremental level-2 order book update.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct L2Diff {
+    pub agent: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    #[serde(rename = "s")]
+    pub symbol: String,
+    pub bids: Vec<[String; 2]>,
+    pub asks: Vec<[String; 2]>,
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
+
+impl L2Diff {
+    pub fn new(agent: &str, symbol: &str, bids: Vec<[String; 2]>, asks: Vec<[String; 2]>, ts: i64) -> Self {
+        let sym = CanonicalService::canonical_pair(agent, symbol).unwrap_or_else(|| symbol.to_string());
+        Self {
+            agent: agent.to_string(),
+            event_type: "l2_diff".to_string(),
+            symbol: sym,
+            bids,
+            asks,
+            timestamp: ts,
+        }
+    }
+
+    pub fn to_json_line(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
+    }
+}
+
+/// Canonical representation of a full order book snapshot.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Snapshot {
+    pub agent: String,
+    #[serde(rename = "type")]
+    pub event_type: String,
+    #[serde(rename = "s")]
+    pub symbol: String,
+    pub bids: Vec<[String; 2]>,
+    pub asks: Vec<[String; 2]>,
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
+
+impl Snapshot {
+    pub fn new(agent: &str, symbol: &str, bids: Vec<[String; 2]>, asks: Vec<[String; 2]>, ts: i64) -> Self {
+        let sym = CanonicalService::canonical_pair(agent, symbol).unwrap_or_else(|| symbol.to_string());
+        Self {
+            agent: agent.to_string(),
+            event_type: "snapshot".to_string(),
+            symbol: sym,
+            bids,
+            asks,
+            timestamp: ts,
+        }
+    }
+
+    pub fn to_json_line(&self) -> String {
+        serde_json::to_string(self).unwrap_or_default()
     }
 }
 

@@ -34,10 +34,145 @@ pub static LAST_TRADE_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static LAST_MARK_PRICE_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_mark_price_timestamp",
+        "Unix timestamp of last mark price received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static LAST_FUNDING_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_funding_timestamp",
+        "Unix timestamp of last funding event received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static LAST_OPEN_INTEREST_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_open_interest_timestamp",
+        "Unix timestamp of last open interest event received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static LAST_TERM_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_term_structure_timestamp",
+        "Unix timestamp of last term structure event received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static LAST_LIQUIDATION_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_liquidation_timestamp",
+        "Unix timestamp of last liquidation event received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
 pub static CANONICALIZER_RESTARTS: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "canonicalizer_restarts_total",
         "Number of canonicalizer restarts"
+    )
+    .unwrap()
+});
+
+pub static STREAM_LATENCY_MS: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "stream_latency_ms",
+        "Latency between event timestamp and ingest in ms",
+        &["agent", "stream"]
+pub static METADATA_FETCH_LATENCY: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "metadata_fetch_latency_ms",
+        "Latency of metadata HTTP requests in milliseconds",
+    )
+    .unwrap()
+});
+
+pub static STREAM_DROPS: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "stream_dropped_total",
+        "Messages dropped per stream",
+        &["agent", "stream"]
+    )
+    .unwrap()
+});
+
+pub static STREAM_SEQ_GAPS: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "stream_sequence_gaps_total",
+        "Detected sequence gaps per stream",
+        &["agent", "stream"]
+    )
+    .unwrap()
+});
+
+pub static STREAM_THROUGHPUT: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "stream_throughput_total",
+        "Number of events emitted per stream",
+        &["agent", "stream"]
+    )
+    .unwrap()
+});
+
+pub static BACKPRESSURE: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "stream_backpressure",
+        "Queued messages waiting to be sent",
+        &["agent", "stream"]
+    )
+    .unwrap()
+});
+
+pub static CLOCK_SKEW: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "clock_skew_ms",
+        "Clock skew compared to NTP/PTP in ms",
+        &["source"]
+    )
+    .unwrap()
+});
+
+pub static RECONNECTS: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "reconnects_total",
+        "Reconnect attempts per agent",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static BACKOFF_SECS: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "backoff_seconds_total",
+        "Total seconds spent backing off per agent",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static VALIDATION_ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "validation_errors_total",
+        "Validation errors encountered",
+        &["agent"]
+pub static METADATA_FETCH_INCIDENTS: Lazy<IntCounterVec> = Lazy::new(|| {
+    register_int_counter_vec!(
+        "metadata_fetch_incidents_total",
+        "Number of metadata fetch errors",
+        &["exchange", "endpoint"]
     )
     .unwrap()
 });

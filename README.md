@@ -3,18 +3,47 @@
 Simple cryptocurrency data ingestor demonstrating async Rust agents. Both
 Binance and Coinbase agents stream market data via WebSockets.
 
-This repository is organised as a Cargo workspace containing two crates:
+This repository is organised as a Cargo workspace containing several crates:
 
 - `crypto-ingestor` – the main executable that spawns exchange agents.
 - `canonicalizer` – a standalone service crate providing a library and binary
   for converting exchange-specific symbols into a canonical `BASE-QUOTE` form.
 - `analytics` – consumes canonicalized trades, tracks latest prices per
   exchange and emits spread events.
+- `on-chain` – monitors DEX pools for liquidity changes and swaps and
+  cross-checks prices against Chainlink and Pyth oracles.
 
 ## Available agents
 
 - `binance` – streams trade data for selected symbols via WebSocket.
 - `coinbase` – streams trade data for selected pairs via WebSocket.
+
+## Phase 1 feeds
+
+`crypto-ingestor` can toggle a variety of market and auxiliary data streams at
+runtime. Each feed is enabled via a dedicated command-line flag:
+
+- `--trades` – raw trade data
+- `--l2-diffs` – incremental order book updates
+- `--l2-snapshots` – full order book snapshots
+- `--book-ticker` – best bid/ask updates
+- `--ticker-24h` – rolling 24‑hour ticker
+- `--ohlcv` – candlestick data
+- `--index-price` – index prices
+- `--mark-price` – futures mark prices
+- `--funding-rates` – funding rate changes
+- `--open-interest` – open interest statistics
+- `--onchain-transfers` – on-chain transfer activity
+- `--onchain-balances` – on-chain balance changes
+- `--top-dex-pools` – top DEX pool prices
+- `--news-headlines` – crypto news headlines
+- `--telemetry` – system telemetry events
+
+Example enabling trades and the 24h ticker:
+
+```bash
+cargo run --release -- --trades --ticker-24h binance:btcusdt
+```
 
 ## Metrics
 
