@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod http_client;
 mod metrics;
+mod metadata;
 mod parse;
 mod sink;
 mod token_state;
@@ -76,6 +77,9 @@ async fn main() -> Result<(), IngestorError> {
     };
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+
+    // periodically refresh reference data
+    tokio::spawn(metadata::run(shutdown_rx.clone(), sink.clone()));
 
     // spawn canonicalizer process
     let exe = std::env::current_exe()?;
