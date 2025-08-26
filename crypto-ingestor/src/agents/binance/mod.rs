@@ -1,6 +1,7 @@
 use futures_util::{SinkExt, StreamExt};
 pub mod options;
 use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
@@ -9,9 +10,14 @@ use crate::{
     config::Settings,
     error::IngestorError,
     http_client,
-    metrics::{ACTIVE_CONNECTIONS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
+    metrics::{
+        ACTIVE_CONNECTIONS, BACKOFF_SECS, BACKPRESSURE, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED,
+        RECONNECTS, STREAM_DROPS, STREAM_LATENCY_MS, STREAM_SEQ_GAPS, STREAM_THROUGHPUT,
+        VALIDATION_ERRORS,
+    },
     parse::parse_decimal_str,
 };
+use crate::clock;
 
 use super::{shared_symbols, AgentFactory};
 use canonicalizer::CanonicalService;
@@ -241,6 +247,7 @@ async fn connection_task(
     max_reconnect_delay_secs: u64,
 ) {
     let mut attempt: u32 = 0;
+    let mut last_trade_ids: HashMap<String, i64> = HashMap::new();
 
     loop {
         if *shutdown.borrow() {
@@ -301,6 +308,7 @@ async fn connection_task(
                                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
                                         if v.get("id").and_then(|id| id.as_i64()) == Some(1) {
                                             if let Some(err) = v.get("error") {
+                                                VALIDATION_ERRORS.with_label_values(&["binance"]).inc();
                                                 tracing::error!(?err, "subscription error");
                                                 break;
                                             } else {
@@ -316,17 +324,44 @@ async fn connection_task(
                                             .get("t")
                                             .and_then(|t| t.as_i64())
                                             .filter(|id| *id > 0);
-                                        let px = v
+                                        if let Some(id) = trade_id {
+                                            if let Some(last) = last_trade_ids.get_mut(&sym) {
+                                                if id > *last + 1 {
+                                                    STREAM_SEQ_GAPS.with_label_values(&["binance", &sym]).inc_by((id - *last - 1) as u64);
+                                                }
+                                                *last = id;
+                                            } else {
+                                                last_trade_ids.insert(sym.clone(), id);
+                                            }
+                                        }
+                                        let px = match v
                                             .get("p")
                                             .and_then(|p| p.as_str())
                                             .and_then(parse_decimal_str)
-                                            .unwrap_or_else(|| "?".to_string());
-                                        let qty = v
+                                        {
+                                            Some(p) => p,
+                                            None => {
+                                                VALIDATION_ERRORS.with_label_values(&["binance"]).inc();
+                                                "?".to_string()
+                                            }
+                                        };
+                                        let qty = match v
                                             .get("q")
                                             .and_then(|q| q.as_str())
                                             .and_then(parse_decimal_str)
-                                            .unwrap_or_else(|| "?".to_string());
+                                        {
+                                            Some(q) => q,
+                                            None => {
+                                                VALIDATION_ERRORS.with_label_values(&["binance"]).inc();
+                                                "?".to_string()
+                                            }
+                                        };
                                         let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
+                                        let now = chrono::Utc::now().timestamp_millis();
+                                        STREAM_LATENCY_MS
+                                            .with_label_values(&["binance", &sym])
+                                            .set(now - ts);
+                                        let skew = clock::current_skew_ms();
                                         let line = serde_json::json!({
                                             "agent": "binance",
                                             "type": "trade",
@@ -334,17 +369,26 @@ async fn connection_task(
                                             "t": trade_id,
                                             "p": px,
                                             "q": qty,
-                                            "ts": ts
+                                            "ts": ts,
+                                            "skew": skew
                                         }).to_string();
-                                        if tx.send(line).await.is_ok() {
-                                            MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
-                                            LAST_TRADE_TIMESTAMP
-                                                .with_label_values(&["binance"])
-                                                .set(ts);
-                                        } else {
-                                            break;
+                                        let backlog = tx.max_capacity() - tx.capacity();
+                                        BACKPRESSURE.with_label_values(&["binance", &sym]).set(backlog as i64);
+                                        match tx.send(line).await {
+                                            Ok(()) => {
+                                                MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
+                                                STREAM_THROUGHPUT.with_label_values(&["binance", &sym]).inc();
+                                                LAST_TRADE_TIMESTAMP
+                                                    .with_label_values(&["binance"])
+                                                    .set(ts);
+                                            }
+                                            Err(_) => {
+                                                STREAM_DROPS.with_label_values(&["binance", &sym]).inc();
+                                                break;
+                                            }
                                         }
                                     } else {
+                                        VALIDATION_ERRORS.with_label_values(&["binance"]).inc();
                                         tracing::warn!("non-json text msg");
                                     }
                                 }
@@ -370,6 +414,10 @@ async fn connection_task(
         let sleep = std::time::Duration::from_secs(delay);
 
         tracing::info!(?sleep, "reconnecting");
+        RECONNECTS.with_label_values(&["binance"]).inc();
+        BACKOFF_SECS
+            .with_label_values(&["binance"])
+            .inc_by(delay);
         tokio::select! {
             _ = tokio::time::sleep(sleep) => {},
             _ = shutdown.changed() => {
