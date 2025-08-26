@@ -5,6 +5,12 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 use tracing::info;
 
+pub mod monitor;
+pub use monitor::{
+    spawn_metrics, AnalyticsMetrics, BridgeEvent, ExchangeFlows, StablecoinMonitorEvent,
+    ValidatorStats,
+};
+
 /// Trade record consumed by the analytics service.
 #[derive(Debug, Deserialize)]
 pub struct Trade {
@@ -109,5 +115,13 @@ mod tests {
         assert_eq!(ev.buy_exchange, "a");
         assert_eq!(ev.sell_exchange, "b");
         assert!(ev.spread >= 15.0 - 1e-6);
+    }
+
+    #[tokio::test]
+    async fn emits_stablecoin_monitor_events() {
+        let (_state, mut rx) = spawn_metrics(std::time::Duration::from_millis(10));
+        let ev = rx.recv().await.unwrap();
+        assert_eq!(ev.stablecoin, "USDC");
+        assert!(ev.supply > 0.0);
     }
 }

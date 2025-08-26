@@ -1,4 +1,4 @@
-use analytics::{spawn, Trade};
+use analytics::{spawn, spawn_metrics, Trade};
 use serde_json::Value;
 use tokio::io::{self, AsyncBufReadExt};
 use tracing_subscriber::FmtSubscriber;
@@ -14,6 +14,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .unwrap_or(1.0);
 
     let (tx, mut rx) = spawn(threshold);
+    let (_metrics, mut sc_rx) = spawn_metrics(std::time::Duration::from_secs(60));
 
     // Task to read canonicalized trades from STDIN and forward to analytics
     tokio::spawn(async move {
@@ -33,6 +34,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     // ignore malformed input
                 }
             }
+        }
+    });
+
+    // Task to print stablecoin monitor events
+    tokio::spawn(async move {
+        while let Ok(event) = sc_rx.recv().await {
+            println!("{}", serde_json::to_string(&event).unwrap());
         }
     });
 
