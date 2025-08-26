@@ -1,8 +1,10 @@
 use futures_util::{SinkExt, StreamExt};
 use rust_decimal::Decimal;
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
+use super::{shared_symbols, AgentFactory};
 use crate::{
     agent::Agent,
     config::Settings,
@@ -62,6 +64,7 @@ pub struct CoinbaseAgent {
     symbols: Vec<String>,
     ws_url: String,
     max_reconnect_delay_secs: u64,
+    refresh_interval_mins: u64,
 }
 
 impl CoinbaseAgent {
@@ -70,6 +73,7 @@ impl CoinbaseAgent {
             symbols,
             ws_url: cfg.coinbase_ws_url.clone(),
             max_reconnect_delay_secs: cfg.coinbase_max_reconnect_delay_secs,
+            refresh_interval_mins: cfg.coinbase_refresh_interval_mins,
         }
     }
 }
@@ -82,23 +86,114 @@ impl Agent for CoinbaseAgent {
 
     async fn run(
         &mut self,
-        shutdown: tokio::sync::watch::Receiver<bool>,
+        mut shutdown: tokio::sync::watch::Receiver<bool>,
         tx: mpsc::Sender<String>,
     ) -> Result<(), IngestorError> {
-        connection_task(
-            self.symbols.clone(),
-            shutdown,
-            tx,
-            self.ws_url.clone(),
-            self.max_reconnect_delay_secs,
-        )
-        .await;
+        let mut handle = None;
+        let mut sym_tx = None;
+
+        if !self.symbols.is_empty() {
+            let (s_tx, rx) = tokio::sync::watch::channel(self.symbols.clone());
+            sym_tx = Some(s_tx);
+            let shutdown_rx = shutdown.clone();
+            let tx_clone = tx.clone();
+            let ws_url = self.ws_url.clone();
+            let max_delay = self.max_reconnect_delay_secs;
+            handle = Some(tokio::spawn(async move {
+                connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
+            }));
+        }
+
+        let mut refresh = tokio::time::interval(std::time::Duration::from_secs(
+            60 * self.refresh_interval_mins,
+        ));
+        refresh.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+
+        loop {
+            tokio::select! {
+                _ = shutdown.changed() => {
+                    if *shutdown.borrow() { break; }
+                }
+                _ = refresh.tick() => {
+                    match fetch_all_symbols().await {
+                        Ok(new_symbols) => {
+                            let new_set: HashSet<_> = new_symbols.iter().cloned().collect();
+                            let old_set: HashSet<_> = self.symbols.iter().cloned().collect();
+                            let added: Vec<_> = new_set.difference(&old_set).cloned().collect();
+                            let removed: Vec<_> = old_set.difference(&new_set).cloned().collect();
+
+                            if added.is_empty() && removed.is_empty() {
+                                tracing::info!("symbol refresh: no changes");
+                            } else {
+                                tracing::info!(?added, ?removed, total=new_symbols.len(), "symbol refresh");
+                                self.symbols = new_symbols;
+
+                                if self.symbols.is_empty() {
+                                    if let Some(tx_sym) = sym_tx.take() {
+                                        let _ = tx_sym.send(Vec::new());
+                                    }
+                                    if let Some(h) = handle.take() {
+                                        let _ = h.await;
+                                    }
+                                } else if let Some(tx_sym) = &sym_tx {
+                                    let _ = tx_sym.send(self.symbols.clone());
+                                } else {
+                                    let (s_tx, rx) = tokio::sync::watch::channel(self.symbols.clone());
+                                    sym_tx = Some(s_tx);
+                                    let shutdown_rx = shutdown.clone();
+                                    let tx_clone = tx.clone();
+                                    let ws_url = self.ws_url.clone();
+                                    let max_delay = self.max_reconnect_delay_secs;
+                                    handle = Some(tokio::spawn(async move {
+                                        connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
+                                    }));
+                                }
+                            }
+                        }
+                        Err(e) => tracing::error!(error=%e, "failed to refresh symbols"),
+                    }
+                }
+            }
+        }
+
+        if let Some(tx_sym) = sym_tx {
+            drop(tx_sym);
+        }
+        if let Some(h) = handle {
+            let _ = h.await;
+        }
+
         Ok(())
     }
 }
 
+pub struct CoinbaseFactory;
+
+#[async_trait::async_trait]
+impl AgentFactory for CoinbaseFactory {
+    async fn create(&self, spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>> {
+        let symbols = if spec.is_empty() {
+            vec!["BTC-USD".to_string()]
+        } else if spec.eq_ignore_ascii_case("all") {
+            match shared_symbols().await {
+                Ok((_, c)) => c,
+                Err(e) => {
+                    tracing::error!(error=%e, "failed to fetch shared symbols");
+                    return None;
+                }
+            }
+        } else {
+            spec.split(',')
+                .map(|s| s.trim().to_uppercase())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        };
+        Some(Box::new(CoinbaseAgent::new(symbols, cfg)))
+    }
+}
+
 async fn connection_task(
-    symbols: Vec<String>,
+    mut symbols_rx: tokio::sync::watch::Receiver<Vec<String>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
     tx: mpsc::Sender<String>,
     ws_url: String,
@@ -112,13 +207,14 @@ async fn connection_task(
         }
 
         tracing::info!(url = %ws_url, "connecting");
+        let mut current_symbols = symbols_rx.borrow().clone();
         match connect_async(&ws_url).await {
             Ok((mut ws, _)) => {
                 tracing::info!("connected");
                 attempt = 0;
                 ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).inc();
 
-                if let Err(e) = send_subscribe(&mut ws, &symbols).await {
+                if let Err(e) = send_subscribe(&mut ws, &current_symbols).await {
                     tracing::error!(error=%e, "failed to send subscription");
                     ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).dec();
                     continue;
@@ -132,6 +228,35 @@ async fn connection_task(
                                 let _ = ws.close(None).await;
                                 ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).dec();
                                 return;
+                            }
+                        }
+                        changed = symbols_rx.changed() => {
+                            if changed.is_ok() {
+                                let new_syms = symbols_rx.borrow().clone();
+                                if new_syms != current_symbols {
+                                    let new_set: HashSet<_> = new_syms.iter().cloned().collect();
+                                    let old_set: HashSet<_> = current_symbols.iter().cloned().collect();
+                                    let to_sub: Vec<_> = new_set.difference(&old_set).cloned().collect();
+                                    let to_unsub: Vec<_> = old_set.difference(&new_set).cloned().collect();
+
+                                    if !to_unsub.is_empty() {
+                                        let _ = send_unsubscribe(&mut ws, &to_unsub).await;
+                                    }
+                                    if !to_sub.is_empty() {
+                                        if let Err(e) = send_subscribe(&mut ws, &to_sub).await {
+                                            tracing::error!(error=%e, "failed to update subscription");
+                                            ERRORS.with_label_values(&["coinbase"]).inc();
+                                            break;
+                                        }
+                                    }
+
+                                    current_symbols = new_syms;
+                                    if current_symbols.is_empty() {
+                                        break;
+                                    }
+                                }
+                            } else {
+                                break;
                             }
                         }
                         msg = ws.next() => {
@@ -201,6 +326,10 @@ async fn connection_task(
             }
         }
 
+        if symbols_rx.borrow().is_empty() {
+            break;
+        }
+
         attempt = attempt.saturating_add(1);
         let exp: u32 = attempt.saturating_sub(1).min(4);
         let delay = (1u64 << exp).min(max_reconnect_delay_secs);
@@ -225,6 +354,21 @@ async fn send_subscribe(
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     let msg = serde_json::json!({
         "type": "subscribe",
+        "product_ids": symbols,
+        "channels": ["matches"],
+    });
+    ws.send(Message::Text(msg.to_string())).await
+}
+
+async fn send_unsubscribe(
+    ws: &mut WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
+    symbols: &[String],
+) -> Result<(), tokio_tungstenite::tungstenite::Error> {
+    if symbols.is_empty() {
+        return Ok(());
+    }
+    let msg = serde_json::json!({
+        "type": "unsubscribe",
         "product_ids": symbols,
         "channels": ["matches"],
     });

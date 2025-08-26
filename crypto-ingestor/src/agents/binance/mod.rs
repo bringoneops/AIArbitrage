@@ -12,6 +12,7 @@ use crate::{
     metrics::{ACTIVE_CONNECTIONS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
 };
 
+use super::{shared_symbols, AgentFactory};
 use canonicalizer::CanonicalService;
 
 const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
@@ -202,6 +203,38 @@ impl Agent for BinanceAgent {
         }
 
         Ok(())
+    }
+}
+
+pub struct BinanceFactory;
+
+#[async_trait::async_trait]
+impl AgentFactory for BinanceFactory {
+    async fn create(&self, spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>> {
+        let symbols = if spec.is_empty() || spec.eq_ignore_ascii_case("all") {
+            match shared_symbols().await {
+                Ok((b, _)) => Some(b),
+                Err(e) => {
+                    tracing::error!(error=%e, "failed to fetch shared symbols");
+                    return None;
+                }
+            }
+        } else {
+            Some(
+                spec.split(',')
+                    .map(|s| s.trim().to_lowercase())
+                    .filter(|s| !s.is_empty())
+                    .collect::<Vec<_>>(),
+            )
+        };
+
+        match BinanceAgent::new(symbols, cfg).await {
+            Ok(agent) => Some(Box::new(agent)),
+            Err(e) => {
+                tracing::error!(error=%e, "failed to create binance agent");
+                None
+            }
+        }
     }
 }
 

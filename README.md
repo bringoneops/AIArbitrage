@@ -8,6 +8,8 @@ This repository is organised as a Cargo workspace containing two crates:
 - `crypto-ingestor` – the main executable that spawns exchange agents.
 - `canonicalizer` – a standalone service crate providing a library and binary
   for converting exchange-specific symbols into a canonical `BASE-QUOTE` form.
+- `analytics` – consumes canonicalized trades, tracks latest prices per
+  exchange and emits spread events.
 
 ## Available agents
 
@@ -90,4 +92,22 @@ Fields:
 When either `binance:all` or `coinbase:all` agents are used, both exchanges
 subscribe only to USD-quoted pairs common to both platforms so their symbol
 sets align.
+
+## Analytics
+
+The `analytics` crate listens for canonicalized trade records, maintains the
+latest price per exchange for each symbol, and computes inter-exchange spreads.
+When a spread exceeds a configurable threshold it emits a JSON event and logs
+the potential arbitrage opportunity.
+
+Run it by piping canonicalized trades from the ingestor:
+
+```bash
+cargo run --release -- binance:btcusdt coinbase:BTC-USD | \
+    cargo run -p analytics -- 10
+```
+
+The numeric argument specifies the minimum spread before an event is produced.
+Consumers can also use the library directly via the channel returned from
+`analytics::spawn`.
 

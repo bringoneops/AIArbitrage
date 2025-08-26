@@ -4,12 +4,17 @@ mod config;
 mod error;
 mod http_client;
 mod metrics;
+extern crate metrics_core as metrics;
+mod sink;
+mod telemetry;
 
 use agents::{available_agents, make_agent};
 use canonicalizer::CanonicalService;
 use clap::Parser;
 use config::{Cli, Settings};
 use error::IngestorError;
+use sink::{DynSink, FileSink, KafkaSink, StdoutSink};
+use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -40,6 +45,35 @@ async fn main() -> Result<(), IngestorError> {
     // metrics server
     tokio::spawn(metrics::serve(([0, 0, 0, 0], 9898).into()));
 
+    // initialise output sink
+    let sink: DynSink = match settings.sink.as_str() {
+        "stdout" => Arc::new(StdoutSink::new()),
+        "file" => {
+            let path = settings
+                .file_path
+                .as_ref()
+                .ok_or_else(|| IngestorError::Other("file_path not set".into()))?;
+            Arc::new(FileSink::new(path).await.map_err(IngestorError::Io)?)
+        }
+        "kafka" => {
+            let brokers = settings
+                .kafka_brokers
+                .as_ref()
+                .ok_or_else(|| IngestorError::Other("kafka_brokers not set".into()))?;
+            let topic = settings
+                .kafka_topic
+                .as_ref()
+                .ok_or_else(|| IngestorError::Other("kafka_topic not set".into()))?;
+            Arc::new(KafkaSink::new(brokers, topic)?)
+        }
+        other => {
+            return Err(IngestorError::Other(format!(
+                "unknown sink type: {}",
+                other
+            )));
+        }
+    };
+
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
     // spawn canonicalizer process
@@ -65,6 +99,7 @@ async fn main() -> Result<(), IngestorError> {
 
     // spawn watchdog for canonicalizer process
     let canon_path_clone = canon_path.clone();
+    let sink_clone = sink.clone();
     let canon_watchdog = tokio::spawn(async move {
         let mut rx = rx;
         loop {
@@ -83,7 +118,7 @@ async fn main() -> Result<(), IngestorError> {
             let mut canon_stdin = canon_child.stdin.take().expect("canonicalizer stdin");
             let canon_stdout = canon_child.stdout.take().expect("canonicalizer stdout");
             let mut reader = tokio::io::BufReader::new(canon_stdout).lines();
-            let mut out = tokio::io::stdout();
+            let sink = sink_clone.clone();
 
             loop {
                 tokio::select! {
@@ -106,8 +141,9 @@ async fn main() -> Result<(), IngestorError> {
                     res = reader.next_line() => {
                         match res {
                             Ok(Some(line)) => {
-                                let _ = out.write_all(line.as_bytes()).await;
-                                let _ = out.write_all(b"\n").await;
+                                if let Err(e) = sink.send(&line).await {
+                                    tracing::error!(error=%e, "sink error");
+                                }
                             }
                             _ => break,
                         }
