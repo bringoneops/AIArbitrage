@@ -18,6 +18,7 @@
 //! [`CanonicalService::canonical_pair`].
 
 mod http_client;
+pub mod onchain;
 
 use std::collections::HashSet;
 use std::sync::OnceLock;

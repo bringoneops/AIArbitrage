@@ -31,6 +31,10 @@ rust_decimal = "1"
 thiserror = "1"
 metrics_core = { package = "metrics", version = "0.21" }
 rdkafka = { version = "0.36", features = ["tokio"] }
+ethers = { version = "2", features = ["ws", "abigen"] }
+
+[dev-dependencies]
+tempfile = "3"
 
 [profile.release]
 opt-level = 3
