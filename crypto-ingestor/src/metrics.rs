@@ -34,6 +34,51 @@ pub static LAST_TRADE_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
+pub static LAST_MARK_PRICE_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_mark_price_timestamp",
+        "Unix timestamp of last mark price received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static LAST_FUNDING_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_funding_timestamp",
+        "Unix timestamp of last funding event received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static LAST_OPEN_INTEREST_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_open_interest_timestamp",
+        "Unix timestamp of last open interest event received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static LAST_TERM_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_term_structure_timestamp",
+        "Unix timestamp of last term structure event received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
+pub static LAST_LIQUIDATION_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
+    register_int_gauge_vec!(
+        "last_liquidation_timestamp",
+        "Unix timestamp of last liquidation event received",
+        &["agent"]
+    )
+    .unwrap()
+});
+
 pub static CANONICALIZER_RESTARTS: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "canonicalizer_restarts_total",
