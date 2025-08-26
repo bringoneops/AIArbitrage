@@ -1,5 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
@@ -9,9 +9,14 @@ use crate::{
     config::Settings,
     error::IngestorError,
     http_client,
-    metrics::{ACTIVE_CONNECTIONS, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED},
+    metrics::{
+        ACTIVE_CONNECTIONS, BACKOFF_SECS, BACKPRESSURE, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED,
+        RECONNECTS, STREAM_DROPS, STREAM_LATENCY_MS, STREAM_SEQ_GAPS, STREAM_THROUGHPUT,
+        VALIDATION_ERRORS,
+    },
     parse::parse_decimal_str,
 };
+use crate::clock;
 use canonicalizer::CanonicalService;
 
 /// Fetch all tradable USD product IDs from Coinbase.
@@ -207,6 +212,7 @@ async fn connection_task(
     max_reconnect_delay_secs: u64,
 ) {
     let mut attempt: u32 = 0;
+    let mut last_trade_ids: HashMap<String, i64> = HashMap::new();
 
     loop {
         if *shutdown.borrow() {
@@ -310,6 +316,81 @@ async fn connection_task(
                                                         .with_label_values(&["coinbase"])
                                                         .set(ts);
                                                 } else {
+                                        if typ == "match" {
+                                            let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                            let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                            // Missing or non-positive trade IDs are represented as JSON null.
+                                            let trade_id = v
+                                                .get("trade_id")
+                                                .and_then(|id| id.as_i64())
+                                                .filter(|id| *id > 0);
+                                            if let Some(id) = trade_id {
+                                                if let Some(last) = last_trade_ids.get_mut(&sym) {
+                                                    if id > *last + 1 {
+                                                        STREAM_SEQ_GAPS.with_label_values(&["coinbase", &sym]).inc_by((id - *last - 1) as u64);
+                                                    }
+                                                    *last = id;
+                                                } else {
+                                                    last_trade_ids.insert(sym.clone(), id);
+                                                }
+                                            }
+                                            let price = match v
+                                                .get("price")
+                                                .and_then(|p| p.as_str())
+                                                .and_then(parse_decimal_str)
+                                            {
+                                                Some(p) => p,
+                                                None => {
+                                                    VALIDATION_ERRORS.with_label_values(&["coinbase"]).inc();
+                                                    "?".to_string()
+                                                }
+                                            };
+                                            let size = match v
+                                                .get("size")
+                                                .and_then(|q| q.as_str())
+                                                .and_then(parse_decimal_str)
+                                            {
+                                                Some(q) => q,
+                                                None => {
+                                                    VALIDATION_ERRORS.with_label_values(&["coinbase"]).inc();
+                                                    "?".to_string()
+                                                }
+                                            };
+                                            let ts = v
+                                                .get("time")
+                                                .and_then(|t| t.as_str())
+                                                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                .map(|dt| dt.timestamp_millis())
+                                                .unwrap_or_default();
+                                            let now = chrono::Utc::now().timestamp_millis();
+                                            STREAM_LATENCY_MS
+                                                .with_label_values(&["coinbase", &sym])
+                                                .set(now - ts);
+                                            let skew = clock::current_skew_ms();
+                                            let line = serde_json::json!({
+                                                "agent": "coinbase",
+                                                "type": "trade",
+                                                "s": sym,
+                                                "t": trade_id,
+                                                "p": price,
+                                                "q": size,
+                                                "ts": ts,
+                                                "skew": skew
+                                            }).to_string();
+                                            let backlog = tx.max_capacity() - tx.capacity();
+                                            BACKPRESSURE
+                                                .with_label_values(&["coinbase", &sym])
+                                                .set(backlog as i64);
+                                            match tx.send(line).await {
+                                                Ok(()) => {
+                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
+                                                    STREAM_THROUGHPUT.with_label_values(&["coinbase", &sym]).inc();
+                                                    LAST_TRADE_TIMESTAMP
+                                                        .with_label_values(&["coinbase"])
+                                                        .set(ts);
+                                                }
+                                                Err(_) => {
+                                                    STREAM_DROPS.with_label_values(&["coinbase", &sym]).inc();
                                                     break;
                                                 }
                                             }
@@ -425,6 +506,7 @@ async fn connection_task(
                                             _ => {}
                                         }
                                     } else {
+                                        VALIDATION_ERRORS.with_label_values(&["coinbase"]).inc();
                                         tracing::warn!("non-json text msg");
                                     }
                                 }
@@ -454,6 +536,10 @@ async fn connection_task(
         let sleep = std::time::Duration::from_secs(delay);
 
         tracing::info!(?sleep, "reconnecting");
+        RECONNECTS.with_label_values(&["coinbase"]).inc();
+        BACKOFF_SECS
+            .with_label_values(&["coinbase"])
+            .inc_by(delay);
         tokio::select! {
             _ = tokio::time::sleep(sleep) => {},
             _ = shutdown.changed() => {

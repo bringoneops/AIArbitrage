@@ -18,6 +18,10 @@
 //! [`CanonicalService::canonical_pair`].
 
 mod http_client;
+pub mod events;
+
+pub use events::{OptionChain, OptionGreeks, OptionQuote};
+pub mod onchain;
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
