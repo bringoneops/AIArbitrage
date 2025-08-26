@@ -7,6 +7,7 @@ mod metrics;
 mod metadata;
 mod parse;
 mod sink;
+mod clock;
 mod token_state;
 mod labels;
 
@@ -46,6 +47,7 @@ async fn main() -> Result<(), IngestorError> {
 
     // metrics server
     tokio::spawn(metrics::serve(([0, 0, 0, 0], 9898).into()));
+    clock::spawn_clock_sync();
 
     // initialise output sink
     let sink: DynSink = match settings.sink.as_str() {

@@ -6,6 +6,7 @@ pub mod metadata;
 pub mod metrics;
 pub mod parse;
 pub mod sink;
+pub mod clock;
 pub mod token_state;
 pub mod labels;
 pub mod agents;
