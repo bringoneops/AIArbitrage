@@ -1,3 +1,5 @@
+pub mod risk;
+
 use std::collections::HashMap;
 
 pub mod defi_metrics;
