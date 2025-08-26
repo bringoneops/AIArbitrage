@@ -243,9 +243,8 @@ async fn connection_task(
                                         let _ = send_unsubscribe(&mut ws, &to_unsub).await;
                                     }
                                     if !to_sub.is_empty() {
-                                        if let Err(e) = send_subscribe(&mut ws, &to_sub).await {
+                                            if let Err(e) = send_subscribe(&mut ws, &to_sub).await {
                                             tracing::error!(error=%e, "failed to update subscription");
-                                            ERRORS.with_label_values(&["coinbase"]).inc();
                                             break;
                                         }
                                     }
