@@ -4,6 +4,8 @@ members = [
     "canonicalizer",
     "analytics",
     "signals",
+    "onchain-ingestor",
+    "macro-data",
 ]
 resolver = "2"
 
