@@ -6,6 +6,8 @@ mod http_client;
 mod metrics;
 mod parse;
 mod sink;
+mod token_state;
+mod labels;
 
 use agents::{available_agents, make_agent};
 use canonicalizer::CanonicalService;
