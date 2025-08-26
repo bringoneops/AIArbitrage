@@ -13,6 +13,7 @@ use serde::{Deserialize, Serialize};
 use tokio::sync::{broadcast, mpsc};
 use tracing::info;
 
+pub mod orderbook;
 pub mod monitor;
 pub use monitor::{
     spawn_metrics, AnalyticsMetrics, BridgeEvent, ExchangeFlows, StablecoinMonitorEvent,
