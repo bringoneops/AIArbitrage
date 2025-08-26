@@ -41,6 +41,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "analytics"
+version = "0.1.0"
+dependencies = [
+ "chrono",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -821,8 +833,8 @@ dependencies = [
  "clap",
  "config",
  "futures-util",
- "metrics",
  "hyper",
+ "metrics",
  "once_cell",
  "prometheus",
  "reqwest",
