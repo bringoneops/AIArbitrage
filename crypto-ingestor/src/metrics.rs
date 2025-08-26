@@ -38,10 +38,6 @@ pub static LAST_TRADE_TIMESTAMP: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
-pub static ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
-    register_int_counter_vec!("errors_total", "Total number of errors", &["agent"]).unwrap()
-});
-
 pub static CANONICALIZER_RESTARTS: Lazy<IntCounter> = Lazy::new(|| {
     register_int_counter!(
         "canonicalizer_restarts_total",
