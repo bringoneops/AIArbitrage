@@ -3,7 +3,26 @@ pub mod coinbase;
 
 use crate::{agent::Agent, config::Settings, error::IngestorError};
 use canonicalizer::CanonicalService;
+use once_cell::sync::Lazy;
 use std::collections::HashMap;
+use std::sync::Mutex;
+
+#[async_trait::async_trait]
+pub trait AgentFactory: Send + Sync {
+    async fn create(&self, spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>>;
+}
+
+pub static AGENT_FACTORIES: Lazy<Mutex<HashMap<&'static str, Box<dyn AgentFactory>>>> =
+    Lazy::new(|| {
+        let mut m: HashMap<&'static str, Box<dyn AgentFactory>> = HashMap::new();
+        m.insert("binance", Box::new(binance::BinanceFactory));
+        m.insert("coinbase", Box::new(coinbase::CoinbaseFactory));
+        Mutex::new(m)
+    });
+
+pub fn register_agent(name: &'static str, factory: Box<dyn AgentFactory>) {
+    AGENT_FACTORIES.lock().unwrap().insert(name, factory);
+}
 
 async fn shared_symbols() -> Result<(Vec<String>, Vec<String>), IngestorError> {
     // Ensure that the canonicalizer has loaded the quote asset list before we
@@ -47,59 +66,13 @@ pub async fn make_agent(spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>> {
         None => (spec.trim().to_lowercase(), String::new()),
     };
 
-    match name.as_str() {
-        "binance" => {
-            let symbols = if args.is_empty() || args.eq_ignore_ascii_case("all") {
-                match shared_symbols().await {
-                    Ok((b, _)) => Some(b),
-                    Err(e) => {
-                        tracing::error!(error=%e, "failed to fetch shared symbols");
-                        return None;
-                    }
-                }
-            } else {
-                Some(
-                    args.split(',')
-                        .map(|s| s.trim().to_lowercase())
-                        .filter(|s| !s.is_empty())
-                        .collect::<Vec<_>>(),
-                )
-            };
-
-            match binance::BinanceAgent::new(symbols, cfg).await {
-                Ok(agent) => Some(Box::new(agent)),
-                Err(e) => {
-                    tracing::error!(error=%e, "failed to create binance agent");
-                    None
-                }
-            }
-        }
-        "coinbase" => {
-            let symbols = if args.is_empty() {
-                vec!["BTC-USD".to_string()]
-            } else if args.eq_ignore_ascii_case("all") {
-                match shared_symbols().await {
-                    Ok((_, c)) => c,
-                    Err(e) => {
-                        tracing::error!(error=%e, "failed to fetch shared symbols");
-                        return None;
-                    }
-                }
-            } else {
-                args.split(',')
-                    .map(|s| s.trim().to_uppercase())
-                    .filter(|s| !s.is_empty())
-                    .collect::<Vec<_>>()
-            };
-            Some(Box::new(coinbase::CoinbaseAgent::new(symbols, cfg)))
-        }
-        _ => None,
+    if let Some(factory) = AGENT_FACTORIES.lock().unwrap().get(name.as_str()) {
+        factory.create(&args, cfg).await
+    } else {
+        None
     }
 }
 
-pub fn available_agents() -> &'static [&'static str] {
-    &[
-        "binance:<csv symbols|all>  (e.g. binance:btcusdt,ethusdt)",
-        "coinbase:<csv pairs|all>   (e.g. coinbase:BTC-USD,ETH-USD)",
-    ]
+pub fn available_agents() -> Vec<&'static str> {
+    AGENT_FACTORIES.lock().unwrap().keys().copied().collect()
 }
