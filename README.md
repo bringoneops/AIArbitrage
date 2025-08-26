@@ -16,6 +16,33 @@ This repository is organised as a Cargo workspace containing two crates:
 - `binance` – streams trade data for selected symbols via WebSocket.
 - `coinbase` – streams trade data for selected pairs via WebSocket.
 
+## Phase 1 feeds
+
+`crypto-ingestor` can toggle a variety of market and auxiliary data streams at
+runtime. Each feed is enabled via a dedicated command-line flag:
+
+- `--trades` – raw trade data
+- `--l2-diffs` – incremental order book updates
+- `--l2-snapshots` – full order book snapshots
+- `--book-ticker` – best bid/ask updates
+- `--ticker-24h` – rolling 24‑hour ticker
+- `--ohlcv` – candlestick data
+- `--index-price` – index prices
+- `--mark-price` – futures mark prices
+- `--funding-rates` – funding rate changes
+- `--open-interest` – open interest statistics
+- `--onchain-transfers` – on-chain transfer activity
+- `--onchain-balances` – on-chain balance changes
+- `--top-dex-pools` – top DEX pool prices
+- `--news-headlines` – crypto news headlines
+- `--telemetry` – system telemetry events
+
+Example enabling trades and the 24h ticker:
+
+```bash
+cargo run --release -- --trades --ticker-24h binance:btcusdt
+```
+
 ## Metrics
 
 `crypto-ingestor` exposes Prometheus metrics and a health check on port `9898`.
