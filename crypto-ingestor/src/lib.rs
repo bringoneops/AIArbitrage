@@ -3,5 +3,6 @@ pub mod agents;
 pub mod config;
 pub mod error;
 pub mod http_client;
+pub mod metrics;
 pub mod sink;
 pub mod telemetry;

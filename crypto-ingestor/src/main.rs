@@ -3,6 +3,7 @@ mod agents;
 mod config;
 mod error;
 mod http_client;
+mod metrics;
 extern crate metrics_core as metrics;
 mod sink;
 mod telemetry;
@@ -42,7 +43,7 @@ async fn main() -> Result<(), IngestorError> {
     let settings = Settings::load(&cli)?;
 
     // metrics server
-    tokio::spawn(telemetry::serve(([0, 0, 0, 0], 9898).into()));
+    tokio::spawn(metrics::serve(([0, 0, 0, 0], 9898).into()));
 
     // initialise output sink
     let sink: DynSink = match settings.sink.as_str() {
@@ -149,7 +150,7 @@ async fn main() -> Result<(), IngestorError> {
                     }
                     status = canon_child.wait() => {
                         tracing::warn!(?status, "canonicalizer exited; restarting");
-                        metrics_core::counter!("canonicalizer_restarts", 1);
+                        metrics::CANONICALIZER_RESTARTS.inc();
                         break;
                     }
                 }
