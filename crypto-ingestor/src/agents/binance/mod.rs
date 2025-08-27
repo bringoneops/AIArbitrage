@@ -374,17 +374,50 @@ async fn connection_task(
                                                     .get("t")
                                                     .and_then(|t| t.as_i64())
                                                     .filter(|id| *id > 0);
-                                                let px = v
+                                                if let Some(id) = trade_id {
+                                                    if let Some(last) = last_trade_ids.get_mut(&sym) {
+                                                        if id > *last + 1 {
+                                                            STREAM_SEQ_GAPS
+                                                                .with_label_values(&["binance", &sym])
+                                                                .inc_by((id - *last - 1) as u64);
+                                                        }
+                                                        *last = id;
+                                                    } else {
+                                                        last_trade_ids.insert(sym.clone(), id);
+                                                    }
+                                                }
+                                                let px = match v
                                                     .get("p")
                                                     .and_then(|p| p.as_str())
                                                     .and_then(parse_decimal_str)
-                                                    .unwrap_or_else(|| "?".to_string());
-                                                let qty = v
+                                                {
+                                                    Some(p) => p,
+                                                    None => {
+                                                        VALIDATION_ERRORS
+                                                            .with_label_values(&["binance"])
+                                                            .inc();
+                                                        "?".to_string()
+                                                    }
+                                                };
+                                                let qty = match v
                                                     .get("q")
                                                     .and_then(|q| q.as_str())
                                                     .and_then(parse_decimal_str)
-                                                    .unwrap_or_else(|| "?".to_string());
+                                                {
+                                                    Some(q) => q,
+                                                    None => {
+                                                        VALIDATION_ERRORS
+                                                            .with_label_values(&["binance"])
+                                                            .inc();
+                                                        "?".to_string()
+                                                    }
+                                                };
                                                 let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
+                                                let now = chrono::Utc::now().timestamp_millis();
+                                                STREAM_LATENCY_MS
+                                                    .with_label_values(&["binance", &sym])
+                                                    .set(now - ts);
+                                                let skew = clock::current_skew_ms();
                                                 let line = serde_json::json!({
                                                     "agent": "binance",
                                                     "type": "trade",
@@ -392,15 +425,32 @@ async fn connection_task(
                                                     "t": trade_id,
                                                     "p": px,
                                                     "q": qty,
-                                                    "ts": ts
-                                                }).to_string();
-                                                if tx.send(line).await.is_ok() {
-                                                    MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
-                                                    LAST_TRADE_TIMESTAMP
-                                                        .with_label_values(&["binance"])
-                                                        .set(ts);
-                                                } else {
-                                                    break;
+                                                    "ts": ts,
+                                                    "skew": skew
+                                                })
+                                                .to_string();
+                                                let backlog = tx.max_capacity() - tx.capacity();
+                                                BACKPRESSURE
+                                                    .with_label_values(&["binance", &sym])
+                                                    .set(backlog as i64);
+                                                match tx.send(line).await {
+                                                    Ok(()) => {
+                                                        MESSAGES_INGESTED
+                                                            .with_label_values(&["binance"])
+                                                            .inc();
+                                                        STREAM_THROUGHPUT
+                                                            .with_label_values(&["binance", &sym])
+                                                            .inc();
+                                                        LAST_TRADE_TIMESTAMP
+                                                            .with_label_values(&["binance"])
+                                                            .set(ts);
+                                                    }
+                                                    Err(_) => {
+                                                        STREAM_DROPS
+                                                            .with_label_values(&["binance", &sym])
+                                                            .inc();
+                                                        break;
+                                                    }
                                                 }
                                             }
                                             "depthUpdate" => {
@@ -478,74 +528,6 @@ async fn connection_task(
                                                 } else { break; }
                                             }
                                             _ => {}
-                                        let sym = CanonicalService::canonical_pair("binance", raw).unwrap_or_else(|| raw.to_string());
-                                        // Missing or non-positive trade IDs are represented as JSON null.
-                                        let trade_id = v
-                                            .get("t")
-                                            .and_then(|t| t.as_i64())
-                                            .filter(|id| *id > 0);
-                                        if let Some(id) = trade_id {
-                                            if let Some(last) = last_trade_ids.get_mut(&sym) {
-                                                if id > *last + 1 {
-                                                    STREAM_SEQ_GAPS.with_label_values(&["binance", &sym]).inc_by((id - *last - 1) as u64);
-                                                }
-                                                *last = id;
-                                            } else {
-                                                last_trade_ids.insert(sym.clone(), id);
-                                            }
-                                        }
-                                        let px = match v
-                                            .get("p")
-                                            .and_then(|p| p.as_str())
-                                            .and_then(parse_decimal_str)
-                                        {
-                                            Some(p) => p,
-                                            None => {
-                                                VALIDATION_ERRORS.with_label_values(&["binance"]).inc();
-                                                "?".to_string()
-                                            }
-                                        };
-                                        let qty = match v
-                                            .get("q")
-                                            .and_then(|q| q.as_str())
-                                            .and_then(parse_decimal_str)
-                                        {
-                                            Some(q) => q,
-                                            None => {
-                                                VALIDATION_ERRORS.with_label_values(&["binance"]).inc();
-                                                "?".to_string()
-                                            }
-                                        };
-                                        let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
-                                        let now = chrono::Utc::now().timestamp_millis();
-                                        STREAM_LATENCY_MS
-                                            .with_label_values(&["binance", &sym])
-                                            .set(now - ts);
-                                        let skew = clock::current_skew_ms();
-                                        let line = serde_json::json!({
-                                            "agent": "binance",
-                                            "type": "trade",
-                                            "s": sym,
-                                            "t": trade_id,
-                                            "p": px,
-                                            "q": qty,
-                                            "ts": ts,
-                                            "skew": skew
-                                        }).to_string();
-                                        let backlog = tx.max_capacity() - tx.capacity();
-                                        BACKPRESSURE.with_label_values(&["binance", &sym]).set(backlog as i64);
-                                        match tx.send(line).await {
-                                            Ok(()) => {
-                                                MESSAGES_INGESTED.with_label_values(&["binance"]).inc();
-                                                STREAM_THROUGHPUT.with_label_values(&["binance", &sym]).inc();
-                                                LAST_TRADE_TIMESTAMP
-                                                    .with_label_values(&["binance"])
-                                                    .set(ts);
-                                            }
-                                            Err(_) => {
-                                                STREAM_DROPS.with_label_values(&["binance", &sym]).inc();
-                                                break;
-                                            }
                                         }
                                     } else {
                                         VALIDATION_ERRORS.with_label_values(&["binance"]).inc();
