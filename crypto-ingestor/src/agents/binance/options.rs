@@ -30,6 +30,10 @@ impl Agent for BinanceOptionsAgent {
         "binance_options"
     }
 
+    fn event_types(&self) -> Vec<crate::agent::EventType> {
+        Vec::new()
+    }
+
     async fn run(
         &mut self,
         mut shutdown: tokio::sync::watch::Receiver<bool>,
