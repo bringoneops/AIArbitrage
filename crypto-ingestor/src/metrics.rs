@@ -92,10 +92,15 @@ pub static STREAM_LATENCY_MS: Lazy<IntGaugeVec> = Lazy::new(|| {
         "stream_latency_ms",
         "Latency between event timestamp and ingest in ms",
         &["agent", "stream"]
+    )
+    .unwrap()
+});
+
 pub static METADATA_FETCH_LATENCY: Lazy<IntGaugeVec> = Lazy::new(|| {
     register_int_gauge_vec!(
         "metadata_fetch_latency_ms",
         "Latency of metadata HTTP requests in milliseconds",
+        &["exchange", "endpoint"]
     )
     .unwrap()
 });
@@ -168,6 +173,10 @@ pub static VALIDATION_ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
         "validation_errors_total",
         "Validation errors encountered",
         &["agent"]
+    )
+    .unwrap()
+});
+
 pub static METADATA_FETCH_INCIDENTS: Lazy<IntCounterVec> = Lazy::new(|| {
     register_int_counter_vec!(
         "metadata_fetch_incidents_total",
