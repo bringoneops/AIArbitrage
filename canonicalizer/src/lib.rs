@@ -19,7 +19,6 @@
 
 pub mod events;
 mod http_client;
-pub mod events;
 
 pub use events::{OptionChain, OptionGreeks, OptionQuote};
 pub mod onchain;
