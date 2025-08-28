@@ -1,5 +1,17 @@
 use chrono::{DateTime, Utc};
+use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::{sync::OnceLock, time::Duration};
+
+pub fn shared_client() -> &'static Client {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        Client::builder()
+            .timeout(Duration::from_secs(10))
+            .build()
+            .expect("failed to build client")
+    })
+}
 
 fn basic_sentiment(text: &str) -> f32 {
     const POS: [&str; 3] = ["good", "great", "up"];
@@ -26,17 +38,12 @@ pub struct NewsEvent {
     pub published_at: DateTime<Utc>,
 }
 
-pub async fn fetch_news(api_key: &str) -> Result<Vec<NewsEvent>, reqwest::Error> {
+pub async fn fetch_news(client: &Client, api_key: &str) -> Result<Vec<NewsEvent>, reqwest::Error> {
     let url = format!(
         "https://newsapi.org/v2/top-headlines?language=en&apiKey={}",
         api_key
     );
-    let v: serde_json::Value = reqwest::Client::new()
-        .get(&url)
-        .send()
-        .await?
-        .json()
-        .await?;
+    let v: serde_json::Value = client.get(&url).send().await?.json().await?;
     let mut out = Vec::new();
     if let Some(articles) = v.get("articles").and_then(|a| a.as_array()) {
         for art in articles {
@@ -81,9 +88,12 @@ pub struct SocialMetric {
     pub sentiment: f32,
 }
 
-pub async fn fetch_reddit_metric(sub: &str) -> Result<SocialMetric, reqwest::Error> {
+pub async fn fetch_reddit_metric(
+    client: &Client,
+    sub: &str,
+) -> Result<SocialMetric, reqwest::Error> {
     let url = format!("https://www.reddit.com/r/{}/new.json?limit=100", sub);
-    let v: serde_json::Value = reqwest::Client::new()
+    let v: serde_json::Value = client
         .get(&url)
         .header("User-Agent", "aiarbitrage")
         .send()
@@ -116,6 +126,7 @@ pub async fn fetch_reddit_metric(sub: &str) -> Result<SocialMetric, reqwest::Err
 }
 
 pub async fn fetch_twitter_metric(
+    client: &Client,
     bearer: &str,
     query: &str,
 ) -> Result<SocialMetric, reqwest::Error> {
@@ -123,7 +134,7 @@ pub async fn fetch_twitter_metric(
         "https://api.twitter.com/2/tweets/search/recent?max_results=10&query={}",
         query
     );
-    let v: serde_json::Value = reqwest::Client::new()
+    let v: serde_json::Value = client
         .get(&url)
         .bearer_auth(bearer)
         .send()
@@ -158,9 +169,12 @@ pub struct DevActivity {
     pub open_issues: u32,
 }
 
-pub async fn fetch_github_activity(repo: &str) -> Result<DevActivity, reqwest::Error> {
+pub async fn fetch_github_activity(
+    client: &Client,
+    repo: &str,
+) -> Result<DevActivity, reqwest::Error> {
     let url = format!("https://api.github.com/repos/{}", repo);
-    let v: serde_json::Value = reqwest::Client::new()
+    let v: serde_json::Value = client
         .get(&url)
         .header("User-Agent", "aiarbitrage")
         .send()
@@ -195,8 +209,12 @@ pub async fn fetch_google_trends(keyword: &str) -> Result<UsageMetric, reqwest::
     })
 }
 
-pub async fn fetch_app_usage(url: &str, name: &str) -> Result<UsageMetric, reqwest::Error> {
-    let v: serde_json::Value = reqwest::Client::new().get(url).send().await?.json().await?;
+pub async fn fetch_app_usage(
+    client: &Client,
+    url: &str,
+    name: &str,
+) -> Result<UsageMetric, reqwest::Error> {
+    let v: serde_json::Value = client.get(url).send().await?.json().await?;
     let value = v.get("value").and_then(|v| v.as_f64()).unwrap_or(0.0) as f32;
     Ok(UsageMetric {
         name: name.into(),
@@ -222,7 +240,8 @@ mod tests {
             Expectation::matching(request::method_path("GET", "/metric"))
                 .respond_with(json_encoded(serde_json::json!({"value": 2.0}))),
         );
-        let metric = fetch_app_usage(&server.url("/metric").to_string(), "app")
+        let client = shared_client();
+        let metric = fetch_app_usage(client, &server.url("/metric").to_string(), "app")
             .await
             .unwrap();
         assert_eq!(metric.value, 2.0);
