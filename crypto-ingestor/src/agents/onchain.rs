@@ -7,13 +7,12 @@ use tokio::sync::{mpsc::Sender, watch};
 
 use std::sync::Arc;
 
-use crate::{agent::Agent, config::Settings, error::IngestorError, labels::load_labels, token_state::TokenState};
+use crate::{agent::Agent, config::Settings, error::IngestorError, labels::load_labels};
 
 pub struct OnchainAgent {
     provider: Arc<Provider<Ws>>,
     pending: HashMap<H256, Transaction>,
     labels: HashMap<Address, String>,
-    token_state: TokenState,
 }
 
 impl OnchainAgent {
@@ -30,7 +29,6 @@ impl OnchainAgent {
             provider,
             pending: HashMap::new(),
             labels,
-            token_state: TokenState::new(),
         })
     }
 }
