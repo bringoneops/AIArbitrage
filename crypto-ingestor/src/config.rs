@@ -99,6 +99,10 @@ pub struct Settings {
     pub binance_refresh_interval_mins: u64,
     pub binance_max_reconnect_delay_secs: u64,
     #[serde(default)]
+    pub binance_futures_rest_url: Option<String>,
+    #[serde(default)]
+    pub binance_futures_ws_url: Option<String>,
+    #[serde(default)]
     pub binance_options_rest_url: String,
     #[serde(default)]
     pub binance_options_symbols: Vec<String>,
@@ -196,6 +200,8 @@ impl Default for Settings {
             binance_ws_url: String::new(),
             binance_refresh_interval_mins: 60,
             binance_max_reconnect_delay_secs: 30,
+            binance_futures_rest_url: None,
+            binance_futures_ws_url: None,
             binance_options_rest_url: String::new(),
             binance_options_symbols: Vec::new(),
             binance_options_poll_interval_secs: 60,
@@ -242,6 +248,8 @@ impl Settings {
             .set_default("binance_ws_url", "wss://stream.binance.us:9443/ws")?
             .set_default("binance_refresh_interval_mins", 60)?
             .set_default("binance_max_reconnect_delay_secs", 30)?
+            .set_default("binance_futures_rest_url", "https://fapi.binance.com")?
+            .set_default("binance_futures_ws_url", "wss://fstream.binance.com")?
             .set_default(
                 "binance_options_rest_url",
                 "https://eapi.binance.us/eapi/v1",
@@ -317,6 +325,9 @@ impl Settings {
         settings.top_dex_pools = settings.top_dex_pools || cli.top_dex_pools;
         settings.news_headlines = settings.news_headlines || cli.news_headlines;
         settings.telemetry = settings.telemetry || cli.telemetry;
+        settings.binance_futures_rest_url =
+            settings.binance_futures_rest_url.filter(|s| !s.is_empty());
+        settings.binance_futures_ws_url = settings.binance_futures_ws_url.filter(|s| !s.is_empty());
         Ok(settings)
     }
 }
