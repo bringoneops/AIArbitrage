@@ -1,9 +1,11 @@
 use futures_util::{SinkExt, StreamExt};
+pub mod ohlcv;
 pub mod options;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
+use crate::clock;
 use crate::{
     agent::Agent,
     config::Settings,
@@ -12,13 +14,11 @@ use crate::{
     metrics::{
         ACTIVE_CONNECTIONS, BACKOFF_SECS, BACKPRESSURE, LAST_FUNDING_TIMESTAMP,
         LAST_LIQUIDATION_TIMESTAMP, LAST_MARK_PRICE_TIMESTAMP, LAST_OPEN_INTEREST_TIMESTAMP,
-        LAST_TERM_TIMESTAMP, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED, RECONNECTS,
-        STREAM_DROPS, STREAM_LATENCY_MS, STREAM_SEQ_GAPS, STREAM_THROUGHPUT,
-        VALIDATION_ERRORS,
+        LAST_TERM_TIMESTAMP, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED, RECONNECTS, STREAM_DROPS,
+        STREAM_LATENCY_MS, STREAM_SEQ_GAPS, STREAM_THROUGHPUT, VALIDATION_ERRORS,
     },
     parse::parse_decimal_str,
 };
-use crate::clock;
 
 use super::{shared_symbols, AgentFactory};
 use canonicalizer::CanonicalService;
@@ -555,9 +555,7 @@ async fn connection_task(
 
         tracing::info!(?sleep, "reconnecting");
         RECONNECTS.with_label_values(&["binance"]).inc();
-        BACKOFF_SECS
-            .with_label_values(&["binance"])
-            .inc_by(delay);
+        BACKOFF_SECS.with_label_values(&["binance"]).inc_by(delay);
         tokio::select! {
             _ = tokio::time::sleep(sleep) => {},
             _ = shutdown.changed() => {
@@ -587,44 +585,44 @@ async fn snapshot_task(symbol: String, tx: mpsc::Sender<String>) {
         match client.get(&url).send().await {
             Ok(resp) => match resp.json::<serde_json::Value>().await {
                 Ok(v) => {
-                let bids = v
-                    .get("bids")
-                    .and_then(|b| b.as_array())
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|lvl| {
-                        let p = lvl.get(0)?.as_str()?.to_string();
-                        let q = lvl.get(1)?.as_str()?.to_string();
-                        Some([p, q])
+                    let bids = v
+                        .get("bids")
+                        .and_then(|b| b.as_array())
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|lvl| {
+                            let p = lvl.get(0)?.as_str()?.to_string();
+                            let q = lvl.get(1)?.as_str()?.to_string();
+                            Some([p, q])
+                        })
+                        .collect::<Vec<[String; 2]>>();
+                    let asks = v
+                        .get("asks")
+                        .and_then(|b| b.as_array())
+                        .cloned()
+                        .unwrap_or_default()
+                        .into_iter()
+                        .filter_map(|lvl| {
+                            let p = lvl.get(0)?.as_str()?.to_string();
+                            let q = lvl.get(1)?.as_str()?.to_string();
+                            Some([p, q])
+                        })
+                        .collect::<Vec<[String; 2]>>();
+                    let sym = CanonicalService::canonical_pair("binance", &symbol)
+                        .unwrap_or_else(|| symbol.clone());
+                    let ts = chrono::Utc::now().timestamp_millis();
+                    let line = serde_json::json!({
+                        "agent": "binance",
+                        "type": "snapshot",
+                        "s": sym,
+                        "bids": bids,
+                        "asks": asks,
+                        "ts": ts
                     })
-                    .collect::<Vec<[String; 2]>>();
-                let asks = v
-                    .get("asks")
-                    .and_then(|b| b.as_array())
-                    .cloned()
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter_map(|lvl| {
-                        let p = lvl.get(0)?.as_str()?.to_string();
-                        let q = lvl.get(1)?.as_str()?.to_string();
-                        Some([p, q])
-                    })
-                    .collect::<Vec<[String; 2]>>();
-                let sym = CanonicalService::canonical_pair("binance", &symbol)
-                    .unwrap_or_else(|| symbol.clone());
-                let ts = chrono::Utc::now().timestamp_millis();
-                let line = serde_json::json!({
-                    "agent": "binance",
-                    "type": "snapshot",
-                    "s": sym,
-                    "bids": bids,
-                    "asks": asks,
-                    "ts": ts
-                })
-                .to_string();
-                let _ = tx.send(line).await;
-            }
+                    .to_string();
+                    let _ = tx.send(line).await;
+                }
                 Err(e) => {
                     tracing::error!(error=%e, symbol=%symbol, "snapshot parse failed");
                 }
