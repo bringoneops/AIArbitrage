@@ -74,7 +74,29 @@ async fn backfill_symbol(
             }
         };
 
-        let data: Vec<serde_json::Value> = resp.json().await?;
+        let text = resp.text().await?;
+        let value: serde_json::Value = match serde_json::from_str(&text) {
+            Ok(v) => v,
+            Err(e) => {
+                tracing::error!(symbol=%symbol, error=%e, body=%text, "open interest history parse failed");
+                return Ok(());
+            }
+        };
+
+        let data = match value {
+            serde_json::Value::Array(arr) => arr,
+            serde_json::Value::Object(obj) => {
+                let code = obj.get("code").and_then(|v| v.as_i64()).unwrap_or_default();
+                let msg = obj.get("msg").and_then(|v| v.as_str()).unwrap_or("unknown");
+                tracing::error!(symbol=%symbol, code=code, msg=%msg, "open interest history returned error response");
+                return Ok(());
+            }
+            _ => {
+                tracing::error!(symbol=%symbol, body=%text, "unexpected open interest history response");
+                return Ok(());
+            }
+        };
+
         if data.is_empty() {
             break;
         }
@@ -121,4 +143,3 @@ async fn backfill_symbol(
     }
     Ok(())
 }
-
