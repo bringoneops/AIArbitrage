@@ -23,7 +23,8 @@ const LIMIT: usize = 1000;
 /// Backfill historical funding rates for `symbols` and publish events via `tx`.
 ///
 /// `symbols` should be lowercase Binance symbols (e.g. `btcusdt`).
-pub async fn backfill(symbols: &[String], tx: mpsc::Sender<String>) {
+/// `rest_url` is the base URL for Binance futures REST API.
+pub async fn backfill(symbols: &[String], rest_url: &str, tx: mpsc::Sender<String>) {
     let client = match http_client::builder().build() {
         Ok(c) => c,
         Err(e) => {
@@ -33,7 +34,7 @@ pub async fn backfill(symbols: &[String], tx: mpsc::Sender<String>) {
     };
 
     for sym in symbols {
-        if let Err(e) = backfill_symbol(&client, sym, &tx).await {
+        if let Err(e) = backfill_symbol(&client, rest_url, sym, &tx).await {
             tracing::error!(symbol=%sym, error=%e, "funding history backfill failed");
         }
     }
@@ -41,13 +42,15 @@ pub async fn backfill(symbols: &[String], tx: mpsc::Sender<String>) {
 
 async fn backfill_symbol(
     client: &reqwest::Client,
+    rest_url: &str,
     symbol: &str,
     tx: &mpsc::Sender<String>,
 ) -> Result<(), reqwest::Error> {
     let mut start: i64 = 0;
     loop {
         let url = format!(
-            "https://fapi.binance.us/fapi/v1/fundingRate?symbol={}&limit={}&startTime={}",
+            "{}/fapi/v1/fundingRate?symbol={}&limit={}&startTime={}",
+            rest_url,
             symbol.to_uppercase(),
             LIMIT,
             start
