@@ -156,6 +156,78 @@ pub struct OptionChain {
     pub surface: Vec<OptionSurfacePoint>,
 }
 
+/// Order update representing state changes on an exchange.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Order {
+    /// Source exchange name.
+    pub agent: String,
+    /// Canonical `BASE-QUOTE` symbol.
+    #[serde(rename = "s")]
+    pub symbol: String,
+    /// Exchange-assigned order identifier.
+    #[serde(rename = "id")]
+    pub order_id: String,
+    /// Side of the order, e.g. BUY or SELL.
+    #[serde(rename = "side")]
+    pub side: String,
+    /// Current status of the order.
+    #[serde(rename = "st")]
+    pub status: String,
+    /// Order price as a string.
+    #[serde(rename = "p")]
+    pub price: String,
+    /// Order quantity as a string.
+    #[serde(rename = "q")]
+    pub quantity: String,
+    /// Event timestamp in milliseconds.
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
+
+/// Fill event associated with an order execution.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Fill {
+    /// Source exchange name.
+    pub agent: String,
+    /// Canonical `BASE-QUOTE` symbol.
+    #[serde(rename = "s")]
+    pub symbol: String,
+    /// Exchange-assigned order identifier.
+    #[serde(rename = "oid")]
+    pub order_id: String,
+    /// Exchange-assigned trade identifier.
+    #[serde(rename = "tid")]
+    pub trade_id: String,
+    /// Fill price as a string.
+    #[serde(rename = "p")]
+    pub price: String,
+    /// Fill quantity as a string.
+    #[serde(rename = "q")]
+    pub quantity: String,
+    /// Event timestamp in milliseconds.
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
+
+/// Position or balance update for an asset.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Position {
+    /// Source exchange name.
+    pub agent: String,
+    /// Asset or canonical symbol associated with the position.
+    #[serde(rename = "s")]
+    pub symbol: String,
+    /// Free balance quantity.
+    #[serde(rename = "f")]
+    pub free: String,
+    /// Locked or reserved quantity.
+    #[serde(rename = "l")]
+    pub locked: String,
+    /// Event timestamp in milliseconds.
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

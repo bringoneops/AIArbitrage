@@ -3,6 +3,7 @@ pub mod ohlcv;
 pub mod options;
 pub mod funding_history;
 pub mod open_interest_history;
+pub mod account;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};

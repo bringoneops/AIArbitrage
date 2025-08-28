@@ -20,7 +20,9 @@
 pub mod events;
 mod http_client;
 
-pub use events::{Bar, OptionChain, OptionGreeks, OptionQuote, OptionSurfacePoint};
+pub use events::{
+    Bar, Fill, OptionChain, OptionGreeks, OptionQuote, OptionSurfacePoint, Order, Position,
+};
 pub mod onchain;
 
 use std::collections::HashSet;
