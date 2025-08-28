@@ -1,12 +1,8 @@
-use std::path::PathBuf;
-
 use futures_util::{SinkExt, StreamExt};
 use tokio::sync::{mpsc, watch};
 use tokio_tungstenite::connect_async;
 
 use crate::{agent::Agent, config::Settings, error::IngestorError, http_client};
-
-use canonicalizer::{Fill, Order, Position};
 
 /// Coinbase account stream handler. This is a minimal implementation that
 /// authenticates and listens for user-channel messages.
@@ -14,7 +10,6 @@ pub struct CoinbaseAccount {
     api_key: String,
     api_secret: String,
     ws_url: String,
-    offset_file: PathBuf,
 }
 
 impl CoinbaseAccount {
@@ -26,7 +21,6 @@ impl CoinbaseAccount {
             api_key,
             api_secret,
             ws_url,
-            offset_file: PathBuf::from("coinbase_account.offset"),
         })
     }
 
@@ -43,7 +37,7 @@ impl Agent for CoinbaseAccount {
 
     async fn run(
         &mut self,
-        mut shutdown: watch::Receiver<bool>,
+        shutdown: watch::Receiver<bool>,
         _out_tx: mpsc::Sender<String>,
     ) -> Result<(), IngestorError> {
         let (ws, _) = connect_async(&self.ws_url)
