@@ -1,5 +1,4 @@
 use futures_util::{SinkExt, StreamExt};
-pub mod account;
 pub mod funding_history;
 pub mod metadata;
 pub mod ohlcv;

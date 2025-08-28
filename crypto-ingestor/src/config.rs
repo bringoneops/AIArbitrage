@@ -102,8 +102,6 @@ pub struct Settings {
     pub binance_options_rest_url: String,
     #[serde(default)]
     pub binance_options_symbols: Vec<String>,
-    #[serde(default)]
-    pub binance_options_expiries: Vec<String>,
     #[serde(default = "default_binance_options_poll_interval_secs")]
     pub binance_options_poll_interval_secs: u64,
     #[serde(default)]
@@ -200,7 +198,6 @@ impl Default for Settings {
             binance_max_reconnect_delay_secs: 30,
             binance_options_rest_url: String::new(),
             binance_options_symbols: Vec::new(),
-            binance_options_expiries: Vec::new(),
             binance_options_poll_interval_secs: 60,
             deribit_options_rest_url: String::new(),
             deribit_options_symbols: Vec::new(),
