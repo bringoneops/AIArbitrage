@@ -247,7 +247,7 @@ impl Settings {
             .set_default("binance_max_reconnect_delay_secs", 30)?
             .set_default(
                 "binance_options_rest_url",
-                "https://eapi.binance.com/eapi/v1",
+                "https://eapi.binance.us/eapi/v1",
             )?
             .set_default("binance_options_poll_interval_secs", 60)?
             .set_default("binance_ohlcv_poll_interval_secs", 60)?

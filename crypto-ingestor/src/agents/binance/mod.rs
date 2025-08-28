@@ -690,7 +690,7 @@ async fn send_unsubscribe(
 }
 
 async fn mark_price_task(shutdown: tokio::sync::watch::Receiver<bool>, tx: mpsc::Sender<String>) {
-    let url = "wss://fstream.binance.com/stream?streams=!markPrice@arr";
+    let url = "wss://fstream.binance.us/stream?streams=!markPrice@arr";
     aggregated_ws_loop(url, "mark_price", shutdown, tx, |item| {
         let raw = item.get("s").and_then(|s| s.as_str()).unwrap_or("?");
         let sym =
@@ -715,7 +715,7 @@ async fn mark_price_task(shutdown: tokio::sync::watch::Receiver<bool>, tx: mpsc:
 }
 
 async fn funding_rate_task(shutdown: tokio::sync::watch::Receiver<bool>, tx: mpsc::Sender<String>) {
-    let url = "wss://fstream.binance.com/stream?streams=!fundingRate@arr";
+    let url = "wss://fstream.binance.us/stream?streams=!fundingRate@arr";
     aggregated_ws_loop(url, "funding", shutdown, tx, |item| {
         let raw = item.get("s").and_then(|s| s.as_str()).unwrap_or("?");
         let sym =
@@ -743,7 +743,7 @@ async fn open_interest_task(
     shutdown: tokio::sync::watch::Receiver<bool>,
     tx: mpsc::Sender<String>,
 ) {
-    let url = "wss://fstream.binance.com/stream?streams=!openInterest@arr";
+    let url = "wss://fstream.binance.us/stream?streams=!openInterest@arr";
     aggregated_ws_loop(url, "open_interest", shutdown, tx, |item| {
         let raw = item.get("s").and_then(|s| s.as_str()).unwrap_or("?");
         let sym =
@@ -768,7 +768,7 @@ async fn open_interest_task(
 }
 
 async fn liquidation_task(shutdown: tokio::sync::watch::Receiver<bool>, tx: mpsc::Sender<String>) {
-    let url = "wss://fstream.binance.com/stream?streams=!forceOrder@arr";
+    let url = "wss://fstream.binance.us/stream?streams=!forceOrder@arr";
     aggregated_ws_loop(url, "liquidation", shutdown, tx, |item| {
         let raw = item.get("s").and_then(|s| s.as_str()).unwrap_or("?");
         let sym =
@@ -822,7 +822,7 @@ async fn term_structure_task(
             }
             _ = interval.tick() => {
                 for sym in &symbols {
-                    let url = format!("https://fapi.binance.com/futures/data/basis?symbol={}&period=5m&limit=1", sym.to_uppercase());
+                    let url = format!("https://fapi.binance.us/futures/data/basis?symbol={}&period=5m&limit=1", sym.to_uppercase());
                     if let Ok(resp) = client.get(&url).send().await {
                         if let Ok(resp) = resp.json::<serde_json::Value>().await {
                             if let Some(arr) = resp.as_array().and_then(|a| a.first()) {

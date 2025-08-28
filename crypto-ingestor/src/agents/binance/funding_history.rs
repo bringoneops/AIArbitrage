@@ -47,7 +47,7 @@ async fn backfill_symbol(
     let mut start: i64 = 0;
     loop {
         let url = format!(
-            "https://fapi.binance.com/fapi/v1/fundingRate?symbol={}&limit={}&startTime={}",
+            "https://fapi.binance.us/fapi/v1/fundingRate?symbol={}&limit={}&startTime={}",
             symbol.to_uppercase(),
             LIMIT,
             start
@@ -119,4 +119,3 @@ async fn backfill_symbol(
     }
     Ok(())
 }
-
