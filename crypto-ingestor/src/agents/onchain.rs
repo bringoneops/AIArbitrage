@@ -39,10 +39,6 @@ impl Agent for OnchainAgent {
         "onchain"
     }
 
-    fn event_types(&self) -> Vec<crate::agent::EventType> {
-        Vec::new()
-    }
-
     async fn run(
         &mut self,
         mut shutdown: watch::Receiver<bool>,
