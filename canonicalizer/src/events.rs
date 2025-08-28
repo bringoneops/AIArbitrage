@@ -228,6 +228,58 @@ pub struct Position {
     pub timestamp: i64,
 }
 
+/// Listing information for a tradable symbol.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Listing {
+    /// Source exchange name.
+    pub agent: String,
+    /// Event type, always `"listing"`.
+    #[serde(rename = "type")]
+    pub r#type: String,
+    /// Canonical `BASE-QUOTE` symbol.
+    #[serde(rename = "s")]
+    pub symbol: String,
+    /// Base asset of the market.
+    pub base: String,
+    /// Quote asset of the market.
+    pub quote: String,
+    /// Lot size or quantity increment.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lot_size: Option<String>,
+    /// Event timestamp in milliseconds.
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
+
+/// Fee tier information for a market or exchange.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FeeTier {
+    /// Volume threshold for this tier.
+    pub volume: f64,
+    /// Maker fee rate (e.g. 0.001 for 0.1%).
+    pub maker: f64,
+    /// Taker fee rate.
+    pub taker: f64,
+}
+
+/// Fee schedule describing maker/taker fees across tiers.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct FeeSchedule {
+    /// Source exchange name.
+    pub agent: String,
+    /// Event type, always `"fee_schedule"`.
+    #[serde(rename = "type")]
+    pub r#type: String,
+    /// Optional symbol this schedule applies to.
+    #[serde(rename = "s", skip_serializing_if = "Option::is_none")]
+    pub symbol: Option<String>,
+    /// Ordered fee tiers.
+    pub tiers: Vec<FeeTier>,
+    /// Event timestamp in milliseconds.
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
