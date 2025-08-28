@@ -126,6 +126,17 @@ pub struct OptionQuote {
     pub greeks: Option<OptionGreeks>,
 }
 
+/// Point on an implied volatility surface (strike \times expiry).
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct OptionSurfacePoint {
+    /// Strike price for the quote.
+    pub strike: f64,
+    /// Expiration timestamp associated with this point.
+    pub expiry: i64,
+    /// Implied volatility value.
+    pub iv: f64,
+}
+
 /// Normalised representation of an option chain for a single expiry.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OptionChain {
@@ -140,6 +151,9 @@ pub struct OptionChain {
     pub expiry: i64,
     /// Collection of option quotes at this expiry.
     pub options: Vec<OptionQuote>,
+    /// Implied volatility surface points for this chain.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub surface: Vec<OptionSurfacePoint>,
 }
 
 #[cfg(test)]
@@ -166,6 +180,11 @@ mod tests {
                     theta: Some(-0.01),
                     vega: Some(0.2),
                 }),
+            }],
+            surface: vec![OptionSurfacePoint {
+                strike: 30000.0,
+                expiry: 1_700_000_000,
+                iv: 0.55,
             }],
         };
 
