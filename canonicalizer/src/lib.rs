@@ -20,14 +20,14 @@
 pub mod events;
 mod http_client;
 
-pub use events::{OptionChain, OptionGreeks, OptionQuote};
+pub use events::{Bar, OptionChain, OptionGreeks, OptionQuote};
 pub mod onchain;
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
 
+use serde::{Deserialize, Serialize};
 use tracing::warn;
-use serde::{Serialize, Deserialize};
 
 pub struct CanonicalService;
 
@@ -176,8 +176,15 @@ pub struct L2Diff {
 }
 
 impl L2Diff {
-    pub fn new(agent: &str, symbol: &str, bids: Vec<[String; 2]>, asks: Vec<[String; 2]>, ts: i64) -> Self {
-        let sym = CanonicalService::canonical_pair(agent, symbol).unwrap_or_else(|| symbol.to_string());
+    pub fn new(
+        agent: &str,
+        symbol: &str,
+        bids: Vec<[String; 2]>,
+        asks: Vec<[String; 2]>,
+        ts: i64,
+    ) -> Self {
+        let sym =
+            CanonicalService::canonical_pair(agent, symbol).unwrap_or_else(|| symbol.to_string());
         Self {
             agent: agent.to_string(),
             event_type: "l2_diff".to_string(),
@@ -208,8 +215,15 @@ pub struct Snapshot {
 }
 
 impl Snapshot {
-    pub fn new(agent: &str, symbol: &str, bids: Vec<[String; 2]>, asks: Vec<[String; 2]>, ts: i64) -> Self {
-        let sym = CanonicalService::canonical_pair(agent, symbol).unwrap_or_else(|| symbol.to_string());
+    pub fn new(
+        agent: &str,
+        symbol: &str,
+        bids: Vec<[String; 2]>,
+        asks: Vec<[String; 2]>,
+        ts: i64,
+    ) -> Self {
+        let sym =
+            CanonicalService::canonical_pair(agent, symbol).unwrap_or_else(|| symbol.to_string());
         Self {
             agent: agent.to_string(),
             event_type: "snapshot".to_string(),

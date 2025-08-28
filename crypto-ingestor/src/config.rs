@@ -106,9 +106,17 @@ pub struct Settings {
     pub binance_options_expiries: Vec<String>,
     #[serde(default = "default_binance_options_poll_interval_secs")]
     pub binance_options_poll_interval_secs: u64,
+    #[serde(default)]
+    pub binance_ohlcv_intervals: Vec<u64>,
+    #[serde(default = "default_binance_ohlcv_poll_interval_secs")]
+    pub binance_ohlcv_poll_interval_secs: u64,
     pub coinbase_ws_url: String,
     pub coinbase_refresh_interval_mins: u64,
     pub coinbase_max_reconnect_delay_secs: u64,
+    #[serde(default)]
+    pub coinbase_ohlcv_intervals: Vec<u64>,
+    #[serde(default = "default_coinbase_ohlcv_poll_interval_secs")]
+    pub coinbase_ohlcv_poll_interval_secs: u64,
     #[serde(default = "default_sink")]
     pub sink: String,
     #[serde(default)]
@@ -158,6 +166,14 @@ fn default_binance_options_poll_interval_secs() -> u64 {
     60
 }
 
+fn default_binance_ohlcv_poll_interval_secs() -> u64 {
+    60
+}
+
+fn default_coinbase_ohlcv_poll_interval_secs() -> u64 {
+    60
+}
+
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -168,9 +184,13 @@ impl Default for Settings {
             binance_options_symbols: Vec::new(),
             binance_options_expiries: Vec::new(),
             binance_options_poll_interval_secs: 60,
+            binance_ohlcv_intervals: Vec::new(),
+            binance_ohlcv_poll_interval_secs: 60,
             coinbase_ws_url: String::new(),
             coinbase_refresh_interval_mins: DEFAULT_COINBASE_REFRESH_INTERVAL_MINS,
             coinbase_max_reconnect_delay_secs: 30,
+            coinbase_ohlcv_intervals: Vec::new(),
+            coinbase_ohlcv_poll_interval_secs: 60,
             sink: default_sink(),
             kafka_brokers: None,
             kafka_topic: None,
@@ -200,14 +220,21 @@ impl Settings {
             .set_default("binance_ws_url", "wss://stream.binance.us:9443/ws")?
             .set_default("binance_refresh_interval_mins", 60)?
             .set_default("binance_max_reconnect_delay_secs", 30)?
-            .set_default("binance_options_rest_url", "https://eapi.binance.com/eapi/v1")?
+            .set_default(
+                "binance_options_rest_url",
+                "https://eapi.binance.com/eapi/v1",
+            )?
             .set_default("binance_options_poll_interval_secs", 60)?
+            .set_default("binance_ohlcv_poll_interval_secs", 60)?
+            .set_default("binance_ohlcv_intervals", vec![60])?
             .set_default("coinbase_ws_url", "wss://ws-feed.exchange.coinbase.com")?
             .set_default(
                 "coinbase_refresh_interval_mins",
                 DEFAULT_COINBASE_REFRESH_INTERVAL_MINS,
             )?
             .set_default("coinbase_max_reconnect_delay_secs", 30)?
+            .set_default("coinbase_ohlcv_poll_interval_secs", 60)?
+            .set_default("coinbase_ohlcv_intervals", vec![60])?
             .set_default("sink", "stdout")?
             .set_default("trades", false)?
             .set_default("l2_diffs", false)?

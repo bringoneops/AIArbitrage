@@ -60,6 +60,40 @@ pub struct Liquidation {
     #[serde(rename = "ts")]
     pub timestamp: i64,
 }
+
+/// Candlestick bar (open-high-low-close-volume) for a trading pair.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Bar {
+    /// Source exchange name.
+    pub agent: String,
+    /// Event type, always `"ohlcv"`.
+    #[serde(rename = "type")]
+    pub r#type: String,
+    /// Canonical `BASE-QUOTE` symbol.
+    #[serde(rename = "s")]
+    pub symbol: String,
+    /// Bar interval in seconds.
+    #[serde(rename = "i")]
+    pub interval: u64,
+    /// Open price.
+    #[serde(rename = "o")]
+    pub open: String,
+    /// High price.
+    #[serde(rename = "h")]
+    pub high: String,
+    /// Low price.
+    #[serde(rename = "l")]
+    pub low: String,
+    /// Close price.
+    #[serde(rename = "c")]
+    pub close: String,
+    /// Traded volume during the interval.
+    #[serde(rename = "v")]
+    pub volume: String,
+    /// Start timestamp of the bar in milliseconds.
+    #[serde(rename = "ts")]
+    pub timestamp: i64,
+}
 /// Greeks associated with an option contract.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OptionGreeks {
@@ -140,4 +174,3 @@ mod tests {
         assert_eq!(back, chain);
     }
 }
-
