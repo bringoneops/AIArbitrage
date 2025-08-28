@@ -16,7 +16,6 @@ use canonicalizer::{CanonicalService, Fill, Order, Position};
 /// Binance account stream handler.
 pub struct BinanceAccount {
     api_key: String,
-    api_secret: String,
     ws_url: String,
     offset_file: PathBuf,
 }
@@ -25,11 +24,10 @@ impl BinanceAccount {
     /// Create a new account agent if API credentials are configured.
     pub fn new(cfg: &Settings) -> Option<Self> {
         let api_key = cfg.binance_api_key.clone()?;
-        let api_secret = cfg.binance_api_secret.clone()?;
+        let _api_secret = cfg.binance_api_secret.clone()?;
         let ws_url = cfg.binance_ws_url.clone();
         Some(Self {
             api_key,
-            api_secret,
             ws_url,
             offset_file: PathBuf::from("binance_account.offset"),
         })
@@ -86,7 +84,7 @@ impl Agent for BinanceAccount {
 
     async fn run(
         &mut self,
-        mut shutdown: watch::Receiver<bool>,
+        shutdown: watch::Receiver<bool>,
         out_tx: mpsc::Sender<String>,
     ) -> Result<(), IngestorError> {
         let mut backoff = 1u64;
