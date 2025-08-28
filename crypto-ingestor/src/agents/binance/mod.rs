@@ -106,11 +106,6 @@ impl Agent for BinanceAgent {
         "binance"
     }
 
-    fn event_types(&self) -> Vec<crate::agent::EventType> {
-        use crate::agent::EventType::*;
-        vec![Trade, L2Diff, Snapshot, BookTicker]
-    }
-
     async fn run(
         &mut self,
         mut shutdown: tokio::sync::watch::Receiver<bool>,

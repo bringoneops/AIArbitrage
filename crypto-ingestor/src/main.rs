@@ -8,7 +8,6 @@ mod metadata;
 mod parse;
 mod sink;
 mod clock;
-mod token_state;
 mod labels;
 
 use agents::{available_agents, make_agent};
