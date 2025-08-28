@@ -21,7 +21,8 @@ pub mod events;
 mod http_client;
 
 pub use events::{
-    Bar, Fill, OptionChain, OptionGreeks, OptionQuote, OptionSurfacePoint, Order, Position,
+    Bar, FeeSchedule, FeeTier, Fill, Listing, OptionChain, OptionGreeks, OptionQuote,
+    OptionSurfacePoint, Order, Position,
 };
 pub mod onchain;
 
