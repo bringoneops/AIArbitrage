@@ -123,6 +123,14 @@ pub struct Settings {
     pub coinbase_ohlcv_intervals: Vec<u64>,
     #[serde(default = "default_coinbase_ohlcv_poll_interval_secs")]
     pub coinbase_ohlcv_poll_interval_secs: u64,
+    #[serde(default)]
+    pub binance_api_key: Option<String>,
+    #[serde(default)]
+    pub binance_api_secret: Option<String>,
+    #[serde(default)]
+    pub coinbase_api_key: Option<String>,
+    #[serde(default)]
+    pub coinbase_api_secret: Option<String>,
     #[serde(default = "default_sink")]
     pub sink: String,
     #[serde(default)]
@@ -204,6 +212,10 @@ impl Default for Settings {
             coinbase_max_reconnect_delay_secs: 30,
             coinbase_ohlcv_intervals: Vec::new(),
             coinbase_ohlcv_poll_interval_secs: 60,
+            binance_api_key: None,
+            binance_api_secret: None,
+            coinbase_api_key: None,
+            coinbase_api_secret: None,
             sink: default_sink(),
             kafka_brokers: None,
             kafka_topic: None,
@@ -280,6 +292,19 @@ impl Settings {
         if let Some(p) = &cli.file_path {
             settings.file_path = Some(p.clone());
         }
+        // populate API keys from environment if not set in config
+        settings.binance_api_key = settings
+            .binance_api_key
+            .or_else(|| std::env::var("BINANCE_API_KEY").ok());
+        settings.binance_api_secret = settings
+            .binance_api_secret
+            .or_else(|| std::env::var("BINANCE_API_SECRET").ok());
+        settings.coinbase_api_key = settings
+            .coinbase_api_key
+            .or_else(|| std::env::var("COINBASE_API_KEY").ok());
+        settings.coinbase_api_secret = settings
+            .coinbase_api_secret
+            .or_else(|| std::env::var("COINBASE_API_SECRET").ok());
         settings.trades = settings.trades || cli.trades;
         settings.l2_diffs = settings.l2_diffs || cli.l2_diffs;
         settings.l2_snapshots = settings.l2_snapshots || cli.l2_snapshots;
