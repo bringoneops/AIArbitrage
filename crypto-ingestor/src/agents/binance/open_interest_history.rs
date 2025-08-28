@@ -74,8 +74,15 @@ async fn backfill_symbol(
             }
         };
 
-        let text = resp.text().await?;
-        let value: serde_json::Value = match serde_json::from_str(&text) {
+        let bytes = match resp.bytes().await {
+            Ok(b) => b,
+            Err(e) => {
+                tracing::error!(symbol=%symbol, error=%e, "open interest history body read failed");
+                return Ok(());
+            }
+        };
+        let text = String::from_utf8_lossy(&bytes);
+        let value: serde_json::Value = match serde_json::from_slice(&bytes) {
             Ok(v) => v,
             Err(e) => {
                 tracing::error!(symbol=%symbol, error=%e, body=%text, "open interest history parse failed");
