@@ -96,14 +96,6 @@ pub static STREAM_LATENCY_MS: Lazy<IntGaugeVec> = Lazy::new(|| {
     .unwrap()
 });
 
-pub static METADATA_FETCH_LATENCY: Lazy<IntGaugeVec> = Lazy::new(|| {
-    register_int_gauge_vec!(
-        "metadata_fetch_latency_ms",
-        "Latency of metadata HTTP requests in milliseconds",
-        &["exchange", "endpoint"]
-    )
-    .unwrap()
-});
 
 pub static STREAM_DROPS: Lazy<IntCounterVec> = Lazy::new(|| {
     register_int_counter_vec!(
@@ -177,14 +169,6 @@ pub static VALIDATION_ERRORS: Lazy<IntCounterVec> = Lazy::new(|| {
     .unwrap()
 });
 
-pub static METADATA_FETCH_INCIDENTS: Lazy<IntCounterVec> = Lazy::new(|| {
-    register_int_counter_vec!(
-        "metadata_fetch_incidents_total",
-        "Number of metadata fetch errors",
-        &["exchange", "endpoint"]
-    )
-    .unwrap()
-});
 
 async fn metrics_handler() -> impl axum::response::IntoResponse {
     let mut buffer = Vec::new();
