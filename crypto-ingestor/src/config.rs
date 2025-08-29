@@ -68,11 +68,11 @@ pub struct Cli {
     #[arg(long)]
     pub open_interest: bool,
 
-    /// Enable on-chain transfer feeds
+    /// Enable onchain transfer feeds
     #[arg(long)]
     pub onchain_transfers: bool,
 
-    /// Enable on-chain balance feeds
+    /// Enable onchain balance feeds
     #[arg(long)]
     pub onchain_balances: bool,
 

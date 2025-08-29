@@ -2676,19 +2676,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4895175b425cb1f87721b59f0f286c2092bd4af812243672510e1ac53e2e0ad"
 
 [[package]]
-name = "onchain"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "chrono",
- "reqwest",
- "serde",
- "serde_json",
- "thiserror 1.0.69",
- "tokio 1.47.1",
-]
-
-[[package]]
 name = "onchain-ingestor"
 version = "0.1.0"
 dependencies = [
