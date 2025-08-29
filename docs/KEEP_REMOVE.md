@@ -4,7 +4,6 @@
 | --- | --- | --- |
 | `crypto-ingestor` crate | KEEP | Core exchange ingestion pipeline. |
 | `canonicalizer` crate | KEEP | Provides symbol and event normalization. |
-| `signals` crate | REMOVE | News and sentiment data outside core scope. |
 | `onchain-ingestor` crate | REMOVE | Separate onchain ingestion; non-core. |
 | `macro-data` crate | REMOVE | Macroeconomic data fetchers; out of scope. |
 | `crypto-ingestor/agents/binance` | KEEP | Needed exchange adapter. |

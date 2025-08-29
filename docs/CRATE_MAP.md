@@ -3,7 +3,6 @@
 ## Workspace Members
 - `crypto-ingestor` – binary crate providing exchange ingestion agents.
 - `canonicalizer` – library and binary for symbol/event normalization.
-- `signals` – library fetching news/social/dev activity.
 - `onchain-ingestor` – binary for Ethereum event ingestion.
 - `macro-data` – library and binary for macroeconomic data fetchers.
 
@@ -46,14 +45,6 @@ clap 4, config 0.13, rust_decimal 1, thiserror 1, metrics 0.21, rdkafka 0.36, et
 *Normalization implementations*: `CanonicalService::canonical_pair`, `onchain::format_*`.
 
 *Direct callers*: `crypto-ingestor` agents, `onchain-ingestor`.
-
-### signals
-*Target*: lib
-
-*Dependencies*: reqwest 0.11, tokio 1, serde 1, serde_json 1, chrono 0.4.
-
-*Module*: `lib` with `fetch_news`, `fetch_reddit_metric`, `fetch_twitter_metric`,
-`fetch_github_activity`, etc. No ingest/normalize/validate traits.
 
 ### onchain-ingestor
 *Target*: bin
