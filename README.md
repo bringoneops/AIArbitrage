@@ -10,8 +10,6 @@ This repository is organised as a Cargo workspace containing several crates:
 - `crypto-ingestor` – the main executable that spawns exchange agents.
 - `canonicalizer` – a standalone service crate providing a library and binary
   for converting exchange-specific symbols into a canonical `BASE-QUOTE` form.
-- `on-chain` – monitors DEX pools for liquidity changes and swaps and
-  cross-checks prices against Chainlink and Pyth oracles.
 
 ## Available agents
 
@@ -33,8 +31,8 @@ runtime. Each feed is enabled via a dedicated command-line flag:
 - `--mark-price` – futures mark prices
 - `--funding-rates` – funding rate changes
 - `--open-interest` – open interest statistics
-- `--onchain-transfers` – on-chain transfer activity
-- `--onchain-balances` – on-chain balance changes
+- `--onchain-transfers` – onchain transfer activity
+- `--onchain-balances` – onchain balance changes
 - `--top-dex-pools` – top DEX pool prices
 - `--news-headlines` – crypto news headlines
 - `--telemetry` – system telemetry events

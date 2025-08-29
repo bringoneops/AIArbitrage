@@ -1,7 +1,7 @@
 use ethers_core::types::{Address, Bytes, Log, Transaction, H256, U256, U64};
 use serde::{Deserialize, Serialize};
 
-/// Canonical representation of an on-chain transaction.
+/// Canonical representation of an onchain transaction.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct OnChainTx {
     pub hash: H256,

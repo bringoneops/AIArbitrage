@@ -3,7 +3,6 @@
 ## Workspace Members
 - `crypto-ingestor` – binary crate providing exchange ingestion agents.
 - `canonicalizer` – library and binary for symbol/event normalization.
-- `on-chain` – library with on-chain normalization helpers.
 - `signals` – library fetching news/social/dev activity.
 - `onchain-ingestor` – binary for Ethereum event ingestion.
 - `macro-data` – library and binary for macroeconomic data fetchers.
@@ -42,22 +41,11 @@ clap 4, config 0.13, rust_decimal 1, thiserror 1, metrics 0.21, rdkafka 0.36, et
 - `lib` – `CanonicalService` and event types (`L2Diff`, etc.).
 - `events` – additional canonical structs (`Bar`, `Order`, ...).
 - `http_client` – helper to build TLS HTTP client.
-- `onchain` – formatting for on-chain transactions/logs.
+ - `onchain` – formatting for onchain transactions/logs.
 
 *Normalization implementations*: `CanonicalService::canonical_pair`, `onchain::format_*`.
 
 *Direct callers*: `crypto-ingestor` agents, `onchain-ingestor`.
-
-### on-chain
-*Target*: lib
-
-*Dependencies*: serde 1, serde_json 1, chrono 0.4, async-trait 0.1, reqwest 0.11,
-thiserror 1, tokio 1.
-
-*Modules*: `lib` defining `PoolState`, `DexSwap`, `OraclePrice`, `Oracle` trait,
-`normalize_pool_state`, `normalize_swap`, and oracle helpers.
-
-*Normalization implementations*: `normalize_pool_state`, `normalize_swap`.
 
 ### signals
 *Target*: lib
@@ -76,7 +64,7 @@ rdkafka 0.36, canonicalizer (path), anyhow 1.
 *Modules*: `main` – subscribes to Ethereum blocks/logs and outputs
 canonical JSON via sinks; `sink` – defines `DynSink`, `KafkaSink`, `StdoutSink`.
 
-*Ingest implementations*: `main` uses websocket provider to ingest on-chain data.
+ *Ingest implementations*: `main` uses websocket provider to ingest onchain data.
 
 ### macro-data
 *Targets*: lib + bin
