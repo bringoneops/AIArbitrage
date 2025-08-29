@@ -31,8 +31,6 @@ runtime. Each feed is enabled via a dedicated command-line flag:
 - `--mark-price` – futures mark prices
 - `--funding-rates` – funding rate changes
 - `--open-interest` – open interest statistics
-- `--onchain-transfers` – onchain transfer activity
-- `--onchain-balances` – onchain balance changes
 - `--top-dex-pools` – top DEX pool prices
 - `--news-headlines` – crypto news headlines
 - `--telemetry` – system telemetry events

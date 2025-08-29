@@ -1,7 +1,6 @@
 pub mod binance;
 pub mod coinbase;
 pub mod deribit;
-pub mod onchain;
 
 use crate::{agent::Agent, config::Settings, error::IngestorError};
 use canonicalizer::CanonicalService;
@@ -35,7 +34,6 @@ pub static AGENT_FACTORIES: Lazy<Mutex<HashMap<&'static str, Box<dyn AgentFactor
             "coinbase_ohlcv",
             Box::new(coinbase::ohlcv::CoinbaseOhlcvFactory),
         );
-        m.insert("onchain", Box::new(onchain::OnchainFactory));
         Mutex::new(m)
     });
 
