@@ -41,6 +41,9 @@ runtime. Each feed is enabled via a dedicated command-line flag:
 - `--news-headlines` – crypto news headlines
 - `--telemetry` – system telemetry events
 
+Open interest streams are disabled by default and must be explicitly enabled
+with `--open-interest`.
+
 Example enabling trades and the 24h ticker:
 
 ```bash
