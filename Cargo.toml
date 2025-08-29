@@ -2,7 +2,6 @@
 members = [
     "crypto-ingestor",
     "canonicalizer",
-    "signals",
     "onchain-ingestor",
     "macro-data",
 ]
