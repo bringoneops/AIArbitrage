@@ -41,6 +41,8 @@ runtime. Each feed is enabled via a dedicated command-line flag:
 - `--news-headlines` – crypto news headlines
 - `--telemetry` – system telemetry events
 
+Open interest streams are disabled by default and must be explicitly enabled
+with `--open-interest`.
 Futures backfills accept base assets or common pair formats and normalise them
 to the required Binance symbol. For example `btc` becomes `BTCUSDT` for
 USDT‑margined contracts or `BTCUSD_PERP` when using the coin‑M API. Pairs that

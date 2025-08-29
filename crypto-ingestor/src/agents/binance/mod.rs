@@ -85,6 +85,7 @@ pub struct BinanceAgent {
     refresh_interval_mins: u64,
     futures_ws_url: Option<String>,
     futures_rest_url: Option<String>,
+    open_interest: bool,
 }
 
 impl BinanceAgent {
@@ -101,6 +102,7 @@ impl BinanceAgent {
             refresh_interval_mins: cfg.binance_refresh_interval_mins,
             futures_ws_url: cfg.binance_futures_ws_url.clone(),
             futures_rest_url: cfg.binance_futures_rest_url.clone(),
+            open_interest: cfg.open_interest,
         })
     }
 }
@@ -119,7 +121,9 @@ impl Agent for BinanceAgent {
         // backfill historical funding and open interest before starting streams
         if let Some(rest_url) = &self.futures_rest_url {
             funding_history::backfill(&self.symbols, rest_url, out_tx.clone()).await;
-            open_interest_history::backfill(&self.symbols, rest_url, out_tx.clone()).await;
+            if self.open_interest {
+                open_interest_history::backfill(&self.symbols, rest_url, out_tx.clone()).await;
+            }
         }
 
         let mut handles = Vec::new();
@@ -159,12 +163,14 @@ impl Agent for BinanceAgent {
                 funding_rate_task(&url, shutdown_clone, tx_clone).await;
             }));
 
-            let shutdown_clone = shutdown.clone();
-            let tx_clone = out_tx.clone();
-            let url = ws_url.clone();
-            handles.push(tokio::spawn(async move {
-                open_interest_task(&url, shutdown_clone, tx_clone).await;
-            }));
+            if self.open_interest {
+                let shutdown_clone = shutdown.clone();
+                let tx_clone = out_tx.clone();
+                let url = ws_url.clone();
+                handles.push(tokio::spawn(async move {
+                    open_interest_task(&url, shutdown_clone, tx_clone).await;
+                }));
+            }
 
             let shutdown_clone = shutdown.clone();
             let tx_clone = out_tx.clone();
@@ -215,8 +221,10 @@ impl Agent for BinanceAgent {
                                 if !added.is_empty() {
                                     if let Some(rest_url) = &self.futures_rest_url {
                                         funding_history::backfill(&added, rest_url, out_tx.clone()).await;
-                                        open_interest_history::backfill(&added, rest_url, out_tx.clone()).await;
-                                    }
+                                        if self.open_interest {
+                                            open_interest_history::backfill(&added, rest_url, out_tx.clone()).await;
+                                        }
+                                        }
                                 }
                                 self.symbols = new_symbols;
 
