@@ -24,7 +24,6 @@ pub use events::{
     Bar, FeeSchedule, FeeTier, Fill, Listing, OptionChain, OptionGreeks, OptionQuote,
     OptionSurfacePoint, Order, Position,
 };
-pub mod onchain;
 
 use std::collections::HashSet;
 use std::sync::OnceLock;
@@ -100,7 +99,7 @@ impl CanonicalService {
             }
         }
         let mut quotes: Vec<String> = set.into_iter().collect();
-        quotes.sort_by(|a, b| b.len().cmp(&a.len()));
+        quotes.sort_by_key(|s| std::cmp::Reverse(s.len()));
         Ok(quotes)
     }
 
@@ -110,14 +109,14 @@ impl CanonicalService {
             .map(|s| s.trim().to_lowercase())
             .filter(|s| !s.is_empty())
             .collect();
-        quotes.sort_by(|a, b| b.len().cmp(&a.len()));
+        quotes.sort_by_key(|s| std::cmp::Reverse(s.len()));
         quotes
     }
 
     fn default_binance_quotes() -> Vec<String> {
         const DEFAULT: [&str; 7] = ["usdt", "usdc", "busd", "usd", "btc", "eth", "bnb"];
         let mut quotes: Vec<String> = DEFAULT.iter().map(|q| q.to_string()).collect();
-        quotes.sort_by(|a, b| b.len().cmp(&a.len()));
+        quotes.sort_by_key(|s| std::cmp::Reverse(s.len()));
         quotes
     }
 

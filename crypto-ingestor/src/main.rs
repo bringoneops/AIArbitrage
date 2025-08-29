@@ -1,14 +1,13 @@
 mod agent;
 mod agents;
+mod clock;
 mod config;
 mod error;
 mod http_client;
-mod metrics;
 mod metadata;
+mod metrics;
 mod parse;
 mod sink;
-mod clock;
-mod labels;
 
 use agents::{available_agents, make_agent};
 use canonicalizer::CanonicalService;

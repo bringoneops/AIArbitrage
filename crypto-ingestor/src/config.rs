@@ -68,14 +68,6 @@ pub struct Cli {
     #[arg(long)]
     pub open_interest: bool,
 
-    /// Enable onchain transfer feeds
-    #[arg(long)]
-    pub onchain_transfers: bool,
-
-    /// Enable onchain balance feeds
-    #[arg(long)]
-    pub onchain_balances: bool,
-
     /// Enable top DEX pool price feeds
     #[arg(long)]
     pub top_dex_pools: bool,
@@ -163,10 +155,6 @@ pub struct Settings {
     #[serde(default)]
     pub open_interest: bool,
     #[serde(default)]
-    pub onchain_transfers: bool,
-    #[serde(default)]
-    pub onchain_balances: bool,
-    #[serde(default)]
     pub top_dex_pools: bool,
     #[serde(default)]
     pub news_headlines: bool,
@@ -233,8 +221,6 @@ impl Default for Settings {
             mark_price: false,
             funding_rates: false,
             open_interest: false,
-            onchain_transfers: false,
-            onchain_balances: false,
             top_dex_pools: false,
             news_headlines: false,
             telemetry: false,
@@ -276,8 +262,6 @@ impl Settings {
             .set_default("mark_price", false)?
             .set_default("funding_rates", false)?
             .set_default("open_interest", false)?
-            .set_default("onchain_transfers", false)?
-            .set_default("onchain_balances", false)?
             .set_default("top_dex_pools", false)?
             .set_default("news_headlines", false)?
             .set_default("telemetry", false)?
@@ -320,8 +304,6 @@ impl Settings {
         settings.mark_price = settings.mark_price || cli.mark_price;
         settings.funding_rates = settings.funding_rates || cli.funding_rates;
         settings.open_interest = settings.open_interest || cli.open_interest;
-        settings.onchain_transfers = settings.onchain_transfers || cli.onchain_transfers;
-        settings.onchain_balances = settings.onchain_balances || cli.onchain_balances;
         settings.top_dex_pools = settings.top_dex_pools || cli.top_dex_pools;
         settings.news_headlines = settings.news_headlines || cli.news_headlines;
         settings.telemetry = settings.telemetry || cli.telemetry;
