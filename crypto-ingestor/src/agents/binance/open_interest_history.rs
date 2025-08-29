@@ -20,9 +20,52 @@ use crate::{http_client, parse::parse_decimal_str};
 const LIMIT: usize = 500;
 const PERIOD: &str = "5m";
 
+/// Normalise a user supplied pair into a Binance futures symbol.
+///
+/// Coin‑M (`dapi`) URLs expect `*_USD_PERP` symbols while USDT‑margined
+/// endpoints use the `USDT` suffix. Returns `None` when the pair cannot be
+/// normalised to a supported futures contract.
+fn normalise_pair(symbol: &str, rest_url: &str) -> Option<String> {
+    let coin_m = rest_url.contains("dapi");
+    let s = symbol.to_uppercase().replace(['-', '_', '/'], "");
+
+    if coin_m {
+        if s.ends_with("USDPERP") {
+            let base = s.trim_end_matches("USDPERP");
+            return Some(format!("{}USD_PERP", base));
+        }
+        if s.ends_with("USD") {
+            let base = s.trim_end_matches("USD");
+            return Some(format!("{}USD_PERP", base));
+        }
+        if s.ends_with("USDT") {
+            return None;
+        }
+        if s.chars().all(|c| c.is_ascii_alphabetic()) {
+            return Some(format!("{}USD_PERP", s));
+        }
+    } else {
+        if s.ends_with("USDT") {
+            return Some(s);
+        }
+        if s.ends_with("USD") {
+            let base = s.trim_end_matches("USD");
+            return Some(format!("{}USDT", base));
+        }
+        if s.ends_with("USDPERP") {
+            return None;
+        }
+        if s.chars().all(|c| c.is_ascii_alphabetic()) {
+            return Some(format!("{}USDT", s));
+        }
+    }
+    None
+}
+
 /// Backfill historical open interest for `symbols` and publish events via `tx`.
 ///
-/// `symbols` should be lowercase Binance symbols (e.g. `btcusdt`).
+/// Pair names are normalised to the appropriate futures format (e.g. `BTC`
+/// becomes `BTCUSDT` or `BTCUSD_PERP`).
 /// `rest_url` is the base URL for Binance futures REST API.
 pub async fn backfill(symbols: &[String], rest_url: &str, tx: mpsc::Sender<String>) {
     let client = match http_client::builder().build() {
@@ -34,8 +77,12 @@ pub async fn backfill(symbols: &[String], rest_url: &str, tx: mpsc::Sender<Strin
     };
 
     for sym in symbols {
-        if let Err(e) = backfill_symbol(&client, rest_url, sym, &tx).await {
-            tracing::error!(symbol=%sym, error=%e, "open interest history backfill failed");
+        if let Some(norm) = normalise_pair(sym, rest_url) {
+            if let Err(e) = backfill_symbol(&client, rest_url, &norm, &tx).await {
+                tracing::error!(symbol=%norm, error=%e, "open interest history backfill failed");
+            }
+        } else {
+            tracing::warn!(symbol=%sym, "unsupported futures pair");
         }
     }
 }
@@ -152,4 +199,30 @@ async fn backfill_symbol(
         tokio::time::sleep(Duration::from_millis(200)).await;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::normalise_pair;
+
+    #[test]
+    fn normalises_usdt_symbols() {
+        assert_eq!(
+            normalise_pair("eth", "https://fapi.binance.com"),
+            Some("ETHUSDT".into())
+        );
+        assert_eq!(
+            normalise_pair("ETH-USD", "https://fapi.binance.com"),
+            Some("ETHUSDT".into())
+        );
+    }
+
+    #[test]
+    fn normalises_coin_m_symbols() {
+        assert_eq!(
+            normalise_pair("eth", "https://dapi.binance.com"),
+            Some("ETHUSD_PERP".into())
+        );
+        assert!(normalise_pair("ethusdt", "https://dapi.binance.com").is_none());
+    }
 }
