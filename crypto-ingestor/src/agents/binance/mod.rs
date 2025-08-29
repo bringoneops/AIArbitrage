@@ -1,8 +1,6 @@
 use futures_util::{SinkExt, StreamExt};
-pub mod funding_history;
 pub mod metadata;
 pub mod ohlcv;
-pub mod open_interest_history;
 pub mod options;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
@@ -118,13 +116,7 @@ impl Agent for BinanceAgent {
         mut shutdown: tokio::sync::watch::Receiver<bool>,
         out_tx: mpsc::Sender<String>,
     ) -> Result<(), IngestorError> {
-        // backfill historical funding and open interest before starting streams
-        if let Some(rest_url) = &self.futures_rest_url {
-            funding_history::backfill(&self.symbols, rest_url, out_tx.clone()).await;
-            if self.open_interest {
-                open_interest_history::backfill(&self.symbols, rest_url, out_tx.clone()).await;
-            }
-        }
+        // historical funding and open interest backfill removed
 
         let mut handles = Vec::new();
         let mut symbol_txs = Vec::new();
@@ -218,14 +210,7 @@ impl Agent for BinanceAgent {
                                 tracing::info!("symbol refresh: no changes");
                             } else {
                                 tracing::info!(?added, ?removed, total=new_symbols.len(), "symbol refresh");
-                                if !added.is_empty() {
-                                    if let Some(rest_url) = &self.futures_rest_url {
-                                        funding_history::backfill(&added, rest_url, out_tx.clone()).await;
-                                        if self.open_interest {
-                                            open_interest_history::backfill(&added, rest_url, out_tx.clone()).await;
-                                        }
-                                        }
-                                }
+                                // historical funding and open interest backfill removed
                                 self.symbols = new_symbols;
 
                                 let new_chunks = self
