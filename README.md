@@ -43,11 +43,21 @@ runtime. Each feed is enabled via a dedicated command-line flag:
 
 Open interest streams are disabled by default and must be explicitly enabled
 with `--open-interest`.
+Futures backfills accept base assets or common pair formats and normalise them
+to the required Binance symbol. For example `btc` becomes `BTCUSDT` for
+USDT‑margined contracts or `BTCUSD_PERP` when using the coin‑M API. Pairs that
+cannot be normalised are skipped with a warning.
 
 Example enabling trades and the 24h ticker:
 
 ```bash
 cargo run --release -- --trades --ticker-24h binance:btcusdt
+```
+
+Example fetching funding rates and open interest for BTC futures:
+
+```bash
+cargo run --release -- --funding-rates --open-interest binance:btc
 ```
 
 ## Metrics
