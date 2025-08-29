@@ -18,7 +18,6 @@ clap 4, config 0.13, rust_decimal 1, thiserror 1, metrics 0.21, rdkafka 0.36.
 - `agent` – defines `Agent` trait for ingestion workers.
 - `agents` – factories for exchange adapters.
     - `binance`, `coinbase` – websocket agents emitting raw frames (use `CanonicalService`).
-    - `deribit` – additional agents.
 - `sink` – `OutputSink` trait with `StdoutSink`, `FileSink`, `KafkaSink`.
 - `config` – CLI & settings controlling which feeds run.
 - `metrics`, `clock`, `http_client`, `metadata`, `parse`, `error` – helpers.
