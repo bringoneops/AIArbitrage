@@ -3,7 +3,6 @@
 ## Workspace Members
 - `crypto-ingestor` – binary crate providing exchange ingestion agents.
 - `canonicalizer` – library and binary for symbol/event normalization.
-- `macro-data` – library and binary for macroeconomic data fetchers.
 
 ## Crate Details
 
@@ -43,14 +42,3 @@ clap 4, config 0.13, rust_decimal 1, thiserror 1, metrics 0.21, rdkafka 0.36.
 *Normalization implementations*: `CanonicalService::canonical_pair`.
 
 *Direct callers*: `crypto-ingestor` agents.
-### macro-data
-*Targets*: lib + bin
-
-*Dependencies*: tokio 1, reqwest 0.11, serde 1, serde_json 1, chrono 0.4,
-tracing 0.1, tracing-subscriber 0.3, tokio-util 0.7.
-
-*Modules*: `lib` spawning periodic fetchers for macro metrics
-and crypto indices.
-
-No ingest/normalize/validate traits.
-
