@@ -101,12 +101,6 @@ pub struct Settings {
     #[serde(default = "default_binance_options_poll_interval_secs")]
     pub binance_options_poll_interval_secs: u64,
     #[serde(default)]
-    pub deribit_options_rest_url: String,
-    #[serde(default)]
-    pub deribit_options_symbols: Vec<String>,
-    #[serde(default = "default_deribit_options_poll_interval_secs")]
-    pub deribit_options_poll_interval_secs: u64,
-    #[serde(default)]
     pub binance_ohlcv_intervals: Vec<u64>,
     #[serde(default = "default_binance_ohlcv_poll_interval_secs")]
     pub binance_ohlcv_poll_interval_secs: u64,
@@ -178,10 +172,6 @@ fn default_coinbase_ohlcv_poll_interval_secs() -> u64 {
     60
 }
 
-fn default_deribit_options_poll_interval_secs() -> u64 {
-    60
-}
-
 impl Default for Settings {
     fn default() -> Self {
         Self {
@@ -193,9 +183,6 @@ impl Default for Settings {
             binance_options_rest_url: String::new(),
             binance_options_symbols: Vec::new(),
             binance_options_poll_interval_secs: 60,
-            deribit_options_rest_url: String::new(),
-            deribit_options_symbols: Vec::new(),
-            deribit_options_poll_interval_secs: 60,
             binance_ohlcv_intervals: Vec::new(),
             binance_ohlcv_poll_interval_secs: 60,
             coinbase_ws_url: String::new(),

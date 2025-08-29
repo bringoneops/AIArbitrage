@@ -6,7 +6,6 @@
 | `canonicalizer` crate | KEEP | Provides symbol and event normalization. |
 | `crypto-ingestor/agents/binance` | KEEP | Needed exchange adapter. |
 | `crypto-ingestor/agents/coinbase` | KEEP | Needed exchange adapter. |
-| `crypto-ingestor/agents/deribit` | REMOVE | Options ingestion; non-core. |
 | `crypto-ingestor/sink::StdoutSink` | KEEP | Minimal emit path. |
 | `crypto-ingestor/sink::FileSink` | REMOVE | File output not required. |
 | `crypto-ingestor/sink::KafkaSink` | REMOVE | External bus/outbox. |
