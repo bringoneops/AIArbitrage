@@ -14,7 +14,7 @@ use canonicalizer::CanonicalService;
 use clap::Parser;
 use config::{Cli, Settings};
 use error::IngestorError;
-use sink::{DynSink, FileSink, KafkaSink, StdoutSink};
+use sink::{DynSink, FileSink, StdoutSink};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
@@ -56,17 +56,6 @@ async fn main() -> Result<(), IngestorError> {
                 .as_ref()
                 .ok_or_else(|| IngestorError::Other("file_path not set".into()))?;
             Arc::new(FileSink::new(path).await.map_err(IngestorError::Io)?)
-        }
-        "kafka" => {
-            let brokers = settings
-                .kafka_brokers
-                .as_ref()
-                .ok_or_else(|| IngestorError::Other("kafka_brokers not set".into()))?;
-            let topic = settings
-                .kafka_topic
-                .as_ref()
-                .ok_or_else(|| IngestorError::Other("kafka_topic not set".into()))?;
-            Arc::new(KafkaSink::new(brokers, topic)?)
         }
         other => {
             return Err(IngestorError::Other(format!(

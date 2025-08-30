@@ -60,37 +60,3 @@ impl OutputSink for FileSink {
         Ok(())
     }
 }
-
-pub struct KafkaSink {
-    producer: rdkafka::producer::FutureProducer,
-    topic: String,
-}
-
-impl KafkaSink {
-    pub fn new(brokers: &str, topic: &str) -> Result<Self, IngestorError> {
-        use rdkafka::ClientConfig;
-        let producer: rdkafka::producer::FutureProducer = ClientConfig::new()
-            .set("bootstrap.servers", brokers)
-            .create()
-            .map_err(|e| IngestorError::Other(e.to_string()))?;
-        Ok(Self {
-            producer,
-            topic: topic.to_string(),
-        })
-    }
-}
-
-#[async_trait]
-impl OutputSink for KafkaSink {
-    async fn send(&self, line: &str) -> Result<(), IngestorError> {
-        use rdkafka::producer::FutureRecord;
-        self.producer
-            .send(
-                FutureRecord::to(&self.topic).payload(line).key(""),
-                std::time::Duration::from_secs(0),
-            )
-            .await
-            .map(|_| ())
-            .map_err(|(e, _)| IngestorError::Other(e.to_string()))
-    }
-}
