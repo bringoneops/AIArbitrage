@@ -12,11 +12,6 @@ use crate::{
     config::Settings,
     error::IngestorError,
     http_client,
-    metrics::{
-        ACTIVE_CONNECTIONS, BACKOFF_SECS, BACKPRESSURE, LAST_TRADE_TIMESTAMP, MESSAGES_INGESTED,
-        RECONNECTS, STREAM_DROPS, STREAM_LATENCY_MS, STREAM_SEQ_GAPS, STREAM_THROUGHPUT,
-        VALIDATION_ERRORS,
-    },
     parse::parse_decimal_str,
 };
 use canonicalizer::CanonicalService;
@@ -224,11 +219,9 @@ async fn connection_task(
             Ok((mut ws, _)) => {
                 tracing::info!("connected");
                 attempt = 0;
-                ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).inc();
 
                 if let Err(e) = send_subscribe(&mut ws, &current_symbols).await {
                     tracing::error!(error=%e, "failed to send subscription");
-                    ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).dec();
                     continue;
                 }
 
@@ -238,7 +231,6 @@ async fn connection_task(
                             if *shutdown.borrow() {
                                 tracing::info!("shutdown signal - closing connection");
                                 let _ = ws.close(None).await;
-                                ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).dec();
                                 return;
                             }
                         }
@@ -309,12 +301,7 @@ async fn connection_task(
                                                     "q": size,
                                                     "ts": ts
                                                 }).to_string();
-                                                if tx.send(line).await.is_ok() {
-                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
-                                                    LAST_TRADE_TIMESTAMP
-                                                        .with_label_values(&["coinbase"])
-                                                        .set(ts);
-                                                } else {
+                                                if tx.send(line).await.is_err() {
                                                     let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
                                                     let sym = CanonicalService::canonical_pair("coinbase", raw)
                                                         .unwrap_or_else(|| raw.to_string());
@@ -325,11 +312,6 @@ async fn connection_task(
                                                         .filter(|id| *id > 0);
                                                     if let Some(id) = trade_id {
                                                         if let Some(last) = last_trade_ids.get_mut(&sym) {
-                                                            if id > *last + 1 {
-                                                                STREAM_SEQ_GAPS
-                                                                    .with_label_values(&["coinbase", &sym])
-                                                                    .inc_by((id - *last - 1) as u64);
-                                                            }
                                                             *last = id;
                                                         } else {
                                                             last_trade_ids.insert(sym.clone(), id);
@@ -342,9 +324,6 @@ async fn connection_task(
                                                     {
                                                         Some(p) => p,
                                                         None => {
-                                                            VALIDATION_ERRORS
-                                                                .with_label_values(&["coinbase"])
-                                                                .inc();
                                                             "?".to_string()
                                                         }
                                                     };
@@ -355,9 +334,6 @@ async fn connection_task(
                                                     {
                                                         Some(q) => q,
                                                         None => {
-                                                            VALIDATION_ERRORS
-                                                                .with_label_values(&["coinbase"])
-                                                                .inc();
                                                             "?".to_string()
                                                         }
                                                     };
@@ -367,10 +343,6 @@ async fn connection_task(
                                                         .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
                                                         .map(|dt| dt.timestamp_millis())
                                                         .unwrap_or_default();
-                                                    let now = chrono::Utc::now().timestamp_millis();
-                                                    STREAM_LATENCY_MS
-                                                        .with_label_values(&["coinbase", &sym])
-                                                        .set(now - ts);
                                                     let skew = clock::current_skew_ms();
                                                     let line = serde_json::json!({
                                                         "agent": "coinbase",
@@ -383,28 +355,8 @@ async fn connection_task(
                                                         "skew": skew
                                                     })
                                                     .to_string();
-                                                    let backlog = tx.max_capacity() - tx.capacity();
-                                                    BACKPRESSURE
-                                                        .with_label_values(&["coinbase", &sym])
-                                                        .set(backlog as i64);
-                                                    match tx.send(line).await {
-                                                        Ok(()) => {
-                                                            MESSAGES_INGESTED
-                                                                .with_label_values(&["coinbase"])
-                                                                .inc();
-                                                            STREAM_THROUGHPUT
-                                                                .with_label_values(&["coinbase", &sym])
-                                                                .inc();
-                                                            LAST_TRADE_TIMESTAMP
-                                                                .with_label_values(&["coinbase"])
-                                                                .set(ts);
-                                                        }
-                                                        Err(_) => {
-                                                            STREAM_DROPS
-                                                                .with_label_values(&["coinbase", &sym])
-                                                                .inc();
-                                                            break;
-                                                        }
+                                                    if tx.send(line).await.is_err() {
+                                                        break;
                                                     }
                                                 }
                                             },
@@ -447,7 +399,6 @@ async fn connection_task(
                                                     "ts": ts
                                                 }).to_string();
                                                 if tx.send(line).await.is_ok() {
-                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
                                                 } else { break; }
                                             }
                                             "snapshot" => {
@@ -487,7 +438,6 @@ async fn connection_task(
                                                     "ts": ts
                                                 }).to_string();
                                                 if tx.send(line).await.is_ok() {
-                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
                                                 } else { break; }
                                             }
                                             "ticker" => {
@@ -514,13 +464,11 @@ async fn connection_task(
                                                     "ts": ts
                                                 }).to_string();
                                                 if tx.send(line).await.is_ok() {
-                                                    MESSAGES_INGESTED.with_label_values(&["coinbase"]).inc();
                                                 } else { break; }
                                             }
                                             _ => {}
                                         }
                                     } else {
-                                        VALIDATION_ERRORS.with_label_values(&["coinbase"]).inc();
                                         tracing::warn!("non-json text msg");
                                     }
                                 }
@@ -533,7 +481,6 @@ async fn connection_task(
                         }
                     }
                 }
-                ACTIVE_CONNECTIONS.with_label_values(&["coinbase"]).dec();
             }
             Err(e) => {
                 tracing::error!(error=%e, "connect failed");
@@ -550,8 +497,6 @@ async fn connection_task(
         let sleep = std::time::Duration::from_secs(delay);
 
         tracing::info!(?sleep, "reconnecting");
-        RECONNECTS.with_label_values(&["coinbase"]).inc();
-        BACKOFF_SECS.with_label_values(&["coinbase"]).inc_by(delay);
         tokio::select! {
             _ = tokio::time::sleep(sleep) => {},
             _ = shutdown.changed() => {

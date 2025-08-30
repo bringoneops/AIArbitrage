@@ -5,7 +5,6 @@ mod config;
 mod error;
 mod http_client;
 mod metadata;
-mod metrics;
 mod parse;
 mod sink;
 
@@ -43,8 +42,6 @@ async fn main() -> Result<(), IngestorError> {
     }
     let settings = Settings::load(&cli)?;
 
-    // metrics server
-    tokio::spawn(metrics::serve(([0, 0, 0, 0], 9898).into()));
     clock::spawn_clock_sync();
 
     // initialise output sink
@@ -144,7 +141,6 @@ async fn main() -> Result<(), IngestorError> {
                     }
                     status = canon_child.wait() => {
                         tracing::warn!(?status, "canonicalizer exited; restarting");
-                        metrics::CANONICALIZER_RESTARTS.inc();
                         break;
                     }
                 }

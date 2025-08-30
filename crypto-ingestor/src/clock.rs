@@ -2,7 +2,6 @@ use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicI64, Ordering};
 use std::time::Duration;
 
-use crate::metrics::CLOCK_SKEW;
 
 pub static CLOCK_SKEW_MS: Lazy<AtomicI64> = Lazy::new(|| AtomicI64::new(0));
 
@@ -16,7 +15,6 @@ pub fn spawn_clock_sync() {
                     let now_ms = chrono::Utc::now().timestamp_millis();
                     let offset = now_ms - ntp_ms;
                     CLOCK_SKEW_MS.store(offset, Ordering::Relaxed);
-                    CLOCK_SKEW.with_label_values(&["ntp"]).set(offset);
                 }
                 Err(e) => {
                     tracing::warn!(error=%e, "ntp sync failed");
