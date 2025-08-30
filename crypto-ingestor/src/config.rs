@@ -12,17 +12,9 @@ pub struct Cli {
     #[arg(short, long)]
     pub config: Option<String>,
 
-    /// Output sink type (stdout, kafka, file)
+    /// Output sink type (stdout, file)
     #[arg(long, default_value = "stdout")]
     pub sink: String,
-
-    /// Kafka broker list
-    #[arg(long)]
-    pub kafka_brokers: Option<String>,
-
-    /// Kafka topic
-    #[arg(long)]
-    pub kafka_topic: Option<String>,
 
     /// Output file path
     #[arg(long)]
@@ -122,10 +114,6 @@ pub struct Settings {
     #[serde(default = "default_sink")]
     pub sink: String,
     #[serde(default)]
-    pub kafka_brokers: Option<String>,
-    #[serde(default)]
-    pub kafka_topic: Option<String>,
-    #[serde(default)]
     pub file_path: Option<String>,
 
     #[serde(default)]
@@ -195,8 +183,6 @@ impl Default for Settings {
             coinbase_api_key: None,
             coinbase_api_secret: None,
             sink: default_sink(),
-            kafka_brokers: None,
-            kafka_topic: None,
             file_path: None,
             trades: false,
             l2_diffs: false,
@@ -259,12 +245,7 @@ impl Settings {
         let cfg = builder.build()?;
         let mut settings: Settings = cfg.try_deserialize()?;
         settings.sink = cli.sink.clone();
-        if let Some(b) = &cli.kafka_brokers {
-            settings.kafka_brokers = Some(b.clone());
-        }
-        if let Some(t) = &cli.kafka_topic {
-            settings.kafka_topic = Some(t.clone());
-        }
+
         if let Some(p) = &cli.file_path {
             settings.file_path = Some(p.clone());
         }
