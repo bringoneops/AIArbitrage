@@ -1,66 +1,5 @@
 use serde::{Deserialize, Serialize};
 
-/// Funding rate update from an exchange.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Funding {
-    /// Source exchange name.
-    pub agent: String,
-    /// Canonical `BASE-QUOTE` symbol.
-    #[serde(rename = "s")]
-    pub symbol: String,
-    /// Funding rate as a string.
-    #[serde(rename = "r")]
-    pub rate: String,
-    /// Event timestamp in milliseconds.
-    #[serde(rename = "ts")]
-    pub timestamp: i64,
-}
-
-/// Open interest update for a symbol.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct OpenInterest {
-    pub agent: String,
-    #[serde(rename = "s")]
-    pub symbol: String,
-    /// Open interest quantity.
-    #[serde(rename = "oi")]
-    pub open_interest: String,
-    #[serde(rename = "ts")]
-    pub timestamp: i64,
-}
-
-/// Futures term structure data, typically the basis between spot and futures.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct TermStructure {
-    pub agent: String,
-    #[serde(rename = "s")]
-    pub symbol: String,
-    /// Basis value or similar metric.
-    #[serde(rename = "b")]
-    pub basis: String,
-    #[serde(rename = "ts")]
-    pub timestamp: i64,
-}
-
-/// Liquidation event from the derivatives market.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Liquidation {
-    pub agent: String,
-    #[serde(rename = "s")]
-    pub symbol: String,
-    /// Price at which liquidation occurred.
-    #[serde(rename = "p")]
-    pub price: String,
-    /// Quantity liquidated.
-    #[serde(rename = "q")]
-    pub quantity: String,
-    /// Side of the position being liquidated (BUY/SELL).
-    #[serde(rename = "side")]
-    pub side: String,
-    #[serde(rename = "ts")]
-    pub timestamp: i64,
-}
-
 /// Candlestick bar (open-high-low-close-volume) for a trading pair.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Bar {
@@ -94,6 +33,7 @@ pub struct Bar {
     #[serde(rename = "ts")]
     pub timestamp: i64,
 }
+
 /// Greeks associated with an option contract.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct OptionGreeks {
@@ -154,78 +94,6 @@ pub struct OptionChain {
     /// Implied volatility surface points for this chain.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub surface: Vec<OptionSurfacePoint>,
-}
-
-/// Order update representing state changes on an exchange.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Order {
-    /// Source exchange name.
-    pub agent: String,
-    /// Canonical `BASE-QUOTE` symbol.
-    #[serde(rename = "s")]
-    pub symbol: String,
-    /// Exchange-assigned order identifier.
-    #[serde(rename = "id")]
-    pub order_id: String,
-    /// Side of the order, e.g. BUY or SELL.
-    #[serde(rename = "side")]
-    pub side: String,
-    /// Current status of the order.
-    #[serde(rename = "st")]
-    pub status: String,
-    /// Order price as a string.
-    #[serde(rename = "p")]
-    pub price: String,
-    /// Order quantity as a string.
-    #[serde(rename = "q")]
-    pub quantity: String,
-    /// Event timestamp in milliseconds.
-    #[serde(rename = "ts")]
-    pub timestamp: i64,
-}
-
-/// Fill event associated with an order execution.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Fill {
-    /// Source exchange name.
-    pub agent: String,
-    /// Canonical `BASE-QUOTE` symbol.
-    #[serde(rename = "s")]
-    pub symbol: String,
-    /// Exchange-assigned order identifier.
-    #[serde(rename = "oid")]
-    pub order_id: String,
-    /// Exchange-assigned trade identifier.
-    #[serde(rename = "tid")]
-    pub trade_id: String,
-    /// Fill price as a string.
-    #[serde(rename = "p")]
-    pub price: String,
-    /// Fill quantity as a string.
-    #[serde(rename = "q")]
-    pub quantity: String,
-    /// Event timestamp in milliseconds.
-    #[serde(rename = "ts")]
-    pub timestamp: i64,
-}
-
-/// Position or balance update for an asset.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct Position {
-    /// Source exchange name.
-    pub agent: String,
-    /// Asset or canonical symbol associated with the position.
-    #[serde(rename = "s")]
-    pub symbol: String,
-    /// Free balance quantity.
-    #[serde(rename = "f")]
-    pub free: String,
-    /// Locked or reserved quantity.
-    #[serde(rename = "l")]
-    pub locked: String,
-    /// Event timestamp in milliseconds.
-    #[serde(rename = "ts")]
-    pub timestamp: i64,
 }
 
 /// Listing information for a tradable symbol.
