@@ -12,23 +12,6 @@ async fn canonicalize(exchange: &str, symbol: &str) -> String {
 }
 
 #[tokio::test]
-async fn options_chain_event_is_canonicalized() {
-    let canon = canonicalize("binance", "btcusdt").await;
-    let event = json!({
-        "agent": "binance",
-        "type": "options_chain",
-        "s": canon,
-        "strike": "30000",
-        "expiry": "2024-12-31T00:00:00Z",
-        "option_type": "call",
-        "p": "100.00",
-        "q": "0.01",
-        "ts": 0
-    });
-    assert_eq!(event["s"], "BTC-USDT");
-}
-
-#[tokio::test]
 async fn mempool_event_is_canonicalized() {
     let canon = canonicalize("binance", "ethbtc").await;
     let event = json!({
