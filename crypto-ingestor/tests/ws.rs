@@ -76,6 +76,7 @@ async fn binance_trade_messages_are_canonicalized_with_id() {
         let ack = json!({"id":1}).to_string();
         ws.send(Message::Text(ack)).await.unwrap();
         let msg = json!({
+            "e": "trade",
             "s": "btcusdt",
             "t": 7,
             "p": "50.00",

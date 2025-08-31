@@ -6,13 +6,8 @@ use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use super::{shared_symbols, AgentFactory};
-use crate::clock;
 use crate::{
-    agent::Agent,
-    config::Settings,
-    error::IngestorError,
-    http_client,
-    parse::parse_decimal_str,
+    agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
 };
 use canonicalizer::CanonicalService;
 
@@ -343,7 +338,6 @@ async fn connection_task(
                                                         .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
                                                         .map(|dt| dt.timestamp_millis())
                                                         .unwrap_or_default();
-                                                    let skew = clock::current_skew_ms();
                                                     let line = serde_json::json!({
                                                         "agent": "coinbase",
                                                         "type": "trade",
@@ -351,8 +345,7 @@ async fn connection_task(
                                                         "t": trade_id,
                                                         "p": price,
                                                         "q": size,
-                                                        "ts": ts,
-                                                        "skew": skew
+                                                        "ts": ts
                                                     })
                                                     .to_string();
                                                     if tx.send(line).await.is_err() {
