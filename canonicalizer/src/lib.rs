@@ -21,8 +21,7 @@ pub mod events;
 mod http_client;
 
 pub use events::{
-    Bar, FeeSchedule, FeeTier, Fill, Listing, OptionChain, OptionGreeks, OptionQuote,
-    OptionSurfacePoint, Order, Position,
+    Bar, FeeSchedule, FeeTier, Listing, OptionChain, OptionGreeks, OptionQuote, OptionSurfacePoint,
 };
 
 use std::collections::HashSet;

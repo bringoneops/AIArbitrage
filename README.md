@@ -3,7 +3,7 @@
 Simple cryptocurrency data ingestor demonstrating async Rust agents. Both
 Binance and Coinbase agents stream market data via WebSockets.
 
-> **Note:** Development builds disable TLS certificate verification; do not use in production.
+> **Note:** TLS certificate verification is enforced in all builds by default.
 
 This repository is organised as a Cargo workspace containing several crates:
 
@@ -16,42 +16,13 @@ This repository is organised as a Cargo workspace containing several crates:
 - `binance` – streams trade data for selected symbols via WebSocket.
 - `coinbase` – streams trade data for selected pairs via WebSocket.
 
-## Phase 1 feeds
+## Feeds
 
-`crypto-ingestor` can toggle a variety of market and auxiliary data streams at
-runtime. Each feed is enabled via a dedicated command-line flag:
-
-- `--trades` – raw trade data
-- `--l2-diffs` – incremental order book updates
-- `--l2-snapshots` – full order book snapshots
-- `--book-ticker` – best bid/ask updates
-- `--ticker-24h` – rolling 24‑hour ticker
-- `--ohlcv` – candlestick data
-- `--index-price` – index prices
-- `--mark-price` – futures mark prices
-- `--funding-rates` – funding rate changes
-- `--open-interest` – open interest statistics
-- `--top-dex-pools` – top DEX pool prices
-- `--news-headlines` – crypto news headlines
-- `--telemetry` – system telemetry events
-
-Open interest streams are disabled by default and must be explicitly enabled
-with `--open-interest`.
-Futures backfills accept base assets or common pair formats and normalise them
-to the required Binance symbol. For example `btc` becomes `BTCUSDT` for
-USDT‑margined contracts or `BTCUSD_PERP` when using the coin‑M API. Pairs that
-cannot be normalised are skipped with a warning.
-
-Example enabling trades and the 24h ticker:
+The ingestor currently supports streaming raw trade data. Enable the trade feed
+with the `--trades` flag:
 
 ```bash
-cargo run --release -- --trades --ticker-24h binance:btcusdt
-```
-
-Example fetching funding rates and open interest for BTC futures:
-
-```bash
-cargo run --release -- --funding-rates --open-interest binance:btc
+cargo run --release -- --trades binance:btcusdt
 ```
 
 ## Canonicalizer

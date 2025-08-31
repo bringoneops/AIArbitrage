@@ -1,18 +1,14 @@
 use futures_util::{SinkExt, StreamExt};
 pub mod metadata;
-pub mod ohlcv;
 use std::collections::{HashMap, HashSet};
+pub mod ohlcv;
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
 use super::{shared_symbols, AgentFactory};
-use crate::clock;
 use crate::{
-    agent::Agent,
-    config::Settings,
-    error::IngestorError,
-    http_client,
-    parse::parse_decimal_str,
+    agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
 };
 use canonicalizer::CanonicalService;
 
@@ -162,31 +158,6 @@ impl Agent for CoinbaseAgent {
     }
 }
 
-pub struct CoinbaseFactory;
-
-#[async_trait::async_trait]
-impl AgentFactory for CoinbaseFactory {
-    async fn create(&self, spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>> {
-        let symbols = if spec.is_empty() {
-            vec!["BTC-USD".to_string()]
-        } else if spec.eq_ignore_ascii_case("all") {
-            match shared_symbols().await {
-                Ok((_, c)) => c,
-                Err(e) => {
-                    tracing::error!(error=%e, "failed to fetch shared symbols");
-                    return None;
-                }
-            }
-        } else {
-            spec.split(',')
-                .map(|s| s.trim().to_uppercase())
-                .filter(|s| !s.is_empty())
-                .collect::<Vec<_>>()
-        };
-        Some(Box::new(CoinbaseAgent::new(symbols, cfg)))
-    }
-}
-
 async fn connection_task(
     mut symbols_rx: tokio::sync::watch::Receiver<Vec<String>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
@@ -195,7 +166,6 @@ async fn connection_task(
     max_reconnect_delay_secs: u64,
 ) {
     let mut attempt: u32 = 0;
-    let mut last_trade_ids: HashMap<String, i64> = HashMap::new();
 
     loop {
         if *shutdown.borrow() {
@@ -236,7 +206,7 @@ async fn connection_task(
                                         let _ = send_unsubscribe(&mut ws, &to_unsub).await;
                                     }
                                     if !to_sub.is_empty() {
-                                            if let Err(e) = send_subscribe(&mut ws, &to_sub).await {
+                                        if let Err(e) = send_subscribe(&mut ws, &to_sub).await {
                                             tracing::error!(error=%e, "failed to update subscription");
                                             break;
                                         }
@@ -256,6 +226,40 @@ async fn connection_task(
                                 Some(Ok(Message::Text(txt))) => {
                                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
                                         let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
+                                        if typ == "match" {
+                                            let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                            let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                            let trade_id = v
+                                                .get("trade_id")
+                                                .and_then(|id| id.as_i64())
+                                                .filter(|id| *id > 0);
+                                            let price = v
+                                                .get("price")
+                                                .and_then(|p| p.as_str())
+                                                .and_then(parse_decimal_str)
+                                                .unwrap_or_else(|| "?".to_string());
+                                            let size = v
+                                                .get("size")
+                                                .and_then(|q| q.as_str())
+                                                .and_then(parse_decimal_str)
+                                                .unwrap_or_else(|| "?".to_string());
+                                            let ts = v
+                                                .get("time")
+                                                .and_then(|t| t.as_str())
+                                                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                .map(|dt| dt.timestamp_millis())
+                                                .unwrap_or_default();
+                                            let line = serde_json::json!({
+                                                "agent": "coinbase",
+                                                "type": "trade",
+                                                "s": sym,
+                                                "t": trade_id,
+                                                "p": price,
+                                                "q": size,
+                                                "ts": ts
+                                            }).to_string();
+                                            if tx.send(line).await.is_err() {
+                                                break;
                                         match typ {
                                             "match" => {
                                                 let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
@@ -332,7 +336,6 @@ async fn connection_task(
                                                         .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
                                                         .map(|dt| dt.timestamp_millis())
                                                         .unwrap_or_default();
-                                                    let skew = clock::current_skew_ms();
                                                     let line = serde_json::json!({
                                                         "agent": "coinbase",
                                                         "type": "trade",
@@ -340,8 +343,7 @@ async fn connection_task(
                                                         "t": trade_id,
                                                         "p": price,
                                                         "q": size,
-                                                        "ts": ts,
-                                                        "skew": skew
+                                                        "ts": ts
                                                     })
                                                     .to_string();
                                                     if tx.send(line).await.is_err() {
@@ -429,33 +431,6 @@ async fn connection_task(
                                                 if tx.send(line).await.is_ok() {
                                                 } else { break; }
                                             }
-                                            "ticker" => {
-                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
-                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
-                                                let bid_px = v.get("best_bid").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
-                                                let bid_qty = v.get("best_bid_size").and_then(|q| q.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
-                                                let ask_px = v.get("best_ask").and_then(|p| p.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
-                                                let ask_qty = v.get("best_ask_size").and_then(|q| q.as_str()).and_then(parse_decimal_str).unwrap_or_else(|| "?".to_string());
-                                                let ts = v
-                                                    .get("time")
-                                                    .and_then(|t| t.as_str())
-                                                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                                                    .map(|dt| dt.timestamp_millis())
-                                                    .unwrap_or_default();
-                                                let line = serde_json::json!({
-                                                    "agent": "coinbase",
-                                                    "type": "book_ticker",
-                                                    "s": sym,
-                                                    "bp": bid_px,
-                                                    "bq": bid_qty,
-                                                    "ap": ask_px,
-                                                    "aq": ask_qty,
-                                                    "ts": ts
-                                                }).to_string();
-                                                if tx.send(line).await.is_ok() {
-                                                } else { break; }
-                                            }
-                                            _ => {}
                                         }
                                     } else {
                                         tracing::warn!("non-json text msg");
@@ -463,7 +438,7 @@ async fn connection_task(
                                 }
                                 Some(Ok(Message::Ping(p))) => { let _ = ws.send(Message::Pong(p)).await; }
                                 Some(Ok(Message::Close(frame))) => { tracing::warn!(?frame, "server closed connection"); break; }
-                                Some(Ok(_)) => { }
+                                Some(Ok(_)) => {}
                                 Some(Err(e)) => { tracing::error!(error=%e, "ws error"); break; }
                                 None => { tracing::warn!("stream ended"); break; }
                             }
@@ -498,6 +473,31 @@ async fn connection_task(
     }
 }
 
+pub struct CoinbaseFactory;
+
+#[async_trait::async_trait]
+impl AgentFactory for CoinbaseFactory {
+    async fn create(&self, spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>> {
+        let symbols = if spec.is_empty() {
+            vec!["BTC-USD".to_string()]
+        } else if spec.eq_ignore_ascii_case("all") {
+            match shared_symbols().await {
+                Ok((_, c)) => c,
+                Err(e) => {
+                    tracing::error!(error=%e, "failed to fetch shared symbols");
+                    return None;
+                }
+            }
+        } else {
+            spec.split(',')
+                .map(|s| s.trim().to_uppercase())
+                .filter(|s| !s.is_empty())
+                .collect::<Vec<_>>()
+        };
+        Some(Box::new(CoinbaseAgent::new(symbols, cfg)))
+    }
+}
+
 async fn send_subscribe(
     ws: &mut WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
     symbols: &[String],
@@ -505,7 +505,7 @@ async fn send_subscribe(
     let msg = serde_json::json!({
         "type": "subscribe",
         "product_ids": symbols,
-        "channels": ["matches", "level2", "ticker"],
+        "channels": ["matches"],
     });
     ws.send(Message::Text(msg.to_string())).await
 }
@@ -520,8 +520,7 @@ async fn send_unsubscribe(
     let msg = serde_json::json!({
         "type": "unsubscribe",
         "product_ids": symbols,
-        "channels": ["matches", "level2", "ticker"],
+        "channels": ["matches"],
     });
     ws.send(Message::Text(msg.to_string())).await
 }
-
