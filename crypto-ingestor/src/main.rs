@@ -1,6 +1,5 @@
 mod agent;
 mod agents;
-mod clock;
 mod config;
 mod error;
 mod http_client;
@@ -41,8 +40,6 @@ async fn main() -> Result<(), IngestorError> {
         std::process::exit(2);
     }
     let settings = Settings::load(&cli)?;
-
-    clock::spawn_clock_sync();
 
     // initialise output sink
     let sink: DynSink = match settings.sink.as_str() {

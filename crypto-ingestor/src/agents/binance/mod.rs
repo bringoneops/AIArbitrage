@@ -6,13 +6,8 @@ use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::clock;
 use crate::{
-    agent::Agent,
-    config::Settings,
-    error::IngestorError,
-    http_client,
-    parse::parse_decimal_str,
+    agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
 };
 
 use super::{shared_symbols, AgentFactory};
@@ -404,7 +399,6 @@ async fn connection_task(
                                                     }
                                                 };
                                                   let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
-                                                  let skew = clock::current_skew_ms();
                                                 let line = serde_json::json!({
                                                     "agent": "binance",
                                                     "type": "trade",
@@ -412,8 +406,7 @@ async fn connection_task(
                                                     "t": trade_id,
                                                     "p": px,
                                                     "q": qty,
-                                                    "ts": ts,
-                                                    "skew": skew
+                                                    "ts": ts
                                                 })
                                                 .to_string();
                                                   if tx.send(line).await.is_err() {
