@@ -1,12 +1,10 @@
 use futures_util::{SinkExt, StreamExt};
-pub mod metadata;
 pub mod ohlcv;
 pub mod options;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 
-use crate::clock;
 use crate::{
     agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
 };
@@ -15,7 +13,7 @@ use super::{shared_symbols, AgentFactory};
 use canonicalizer::CanonicalService;
 
 const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
-const STREAMS_PER_SYMBOL: usize = 3; // trade, depth diff, book ticker
+const STREAMS_PER_SYMBOL: usize = 1; // trade only
 
 /// Fetch all tradable symbols from Binance US REST API.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
@@ -71,6 +69,8 @@ pub struct BinanceAgent {
     ws_url: String,
     max_reconnect_delay_secs: u64,
     refresh_interval_mins: u64,
+    futures_ws_url: Option<String>,
+    futures_rest_url: Option<String>,
 }
 
 impl BinanceAgent {
@@ -85,6 +85,8 @@ impl BinanceAgent {
             ws_url: cfg.binance_ws_url.clone(),
             max_reconnect_delay_secs: cfg.binance_max_reconnect_delay_secs,
             refresh_interval_mins: cfg.binance_refresh_interval_mins,
+            futures_ws_url: cfg.binance_futures_ws_url.clone(),
+            futures_rest_url: cfg.binance_futures_rest_url.clone(),
         })
     }
 }
@@ -328,31 +330,29 @@ async fn connection_task(
                                                     .filter(|id| *id > 0);
                                                 if let Some(id) = trade_id {
                                                     if let Some(last) = last_trade_ids.get_mut(&sym) {
-                                                      *last = id;
+                                                        *last = id;
                                                     } else {
                                                         last_trade_ids.insert(sym.clone(), id);
                                                     }
                                                 }
-                                                let px = match v
+                                                let px = v
                                                     .get("p")
                                                     .and_then(|p| p.as_str())
                                                     .and_then(parse_decimal_str)
-                                                {
-                                                    Some(p) => p,
-                                                    None => {                                                        "?".to_string()
-                                                    }
-                                                };
-                                                let qty = match v
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let qty = v
                                                     .get("q")
                                                     .and_then(|q| q.as_str())
                                                     .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
+                                                let skew = clock::current_skew_ms();
                                                 {
                                                     Some(q) => q,
                                                     None => {                                                        "?".to_string()
                                                     }
                                                 };
                                                   let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
-                                                  let skew = clock::current_skew_ms();
                                                 let line = serde_json::json!({
                                                     "agent": "binance",
                                                     "type": "trade",
@@ -360,85 +360,12 @@ async fn connection_task(
                                                     "t": trade_id,
                                                     "p": px,
                                                     "q": qty,
-                                                    "ts": ts,
-                                                    "skew": skew
-                                                })
+                                                    "ts": ts
+                                                })<<<<<<< codex/remove-binanceagent-futures-fields-and-tasks
                                                 .to_string();
-                                                  if tx.send(line).await.is_err() {
-                                                      break;
-                                                  }
-                                            }
-                                            "depthUpdate" => {
-                                                let bids = v
-                                                    .get("b")
-                                                    .and_then(|b| b.as_array())
-                                                    .cloned()
-                                                    .unwrap_or_default()
-                                                    .into_iter()
-                                                    .filter_map(|lvl| {
-                                                        let p = lvl.get(0)?.as_str()?.to_string();
-                                                        let q = lvl.get(1)?.as_str()?.to_string();
-                                                        Some([p, q])
-                                                    })
-                                                    .collect::<Vec<[String;2]>>();
-                                                let asks = v
-                                                    .get("a")
-                                                    .and_then(|a| a.as_array())
-                                                    .cloned()
-                                                    .unwrap_or_default()
-                                                    .into_iter()
-                                                    .filter_map(|lvl| {
-                                                        let p = lvl.get(0)?.as_str()?.to_string();
-                                                        let q = lvl.get(1)?.as_str()?.to_string();
-                                                        Some([p, q])
-                                                    })
-                                                    .collect::<Vec<[String;2]>>();
-                                                let ts = v.get("E").and_then(|x| x.as_i64()).unwrap_or_default();
-                                                let line = serde_json::json!({
-                                                    "agent": "binance",
-                                                    "type": "l2_diff",
-                                                    "s": sym,
-                                                    "bids": bids,
-                                                    "asks": asks,
-                                                    "ts": ts
-                                                }).to_string();
-                                                if tx.send(line).await.is_ok() {
-                                                } else { break; }
-                                            }
-                                            "bookTicker" => {
-                                                let bid_px = v
-                                                    .get("b")
-                                                    .and_then(|p| p.as_str())
-                                                    .and_then(parse_decimal_str)
-                                                    .unwrap_or_else(|| "?".to_string());
-                                                let bid_qty = v
-                                                    .get("B")
-                                                    .and_then(|q| q.as_str())
-                                                    .and_then(parse_decimal_str)
-                                                    .unwrap_or_else(|| "?".to_string());
-                                                let ask_px = v
-                                                    .get("a")
-                                                    .and_then(|p| p.as_str())
-                                                    .and_then(parse_decimal_str)
-                                                    .unwrap_or_else(|| "?".to_string());
-                                                let ask_qty = v
-                                                    .get("A")
-                                                    .and_then(|q| q.as_str())
-                                                    .and_then(parse_decimal_str)
-                                                    .unwrap_or_else(|| "?".to_string());
-                                                let ts = v.get("E").and_then(|x| x.as_i64()).unwrap_or_default();
-                                                let line = serde_json::json!({
-                                                    "agent": "binance",
-                                                    "type": "book_ticker",
-                                                    "s": sym,
-                                                    "bp": bid_px,
-                                                    "bq": bid_qty,
-                                                    "ap": ask_px,
-                                                    "aq": ask_qty,
-                                                    "ts": ts
-                                                }).to_string();
-                                                if tx.send(line).await.is_ok() {
-                                                } else { break; }
+                                                if tx.send(line).await.is_err() {
+                                                    break;
+                                                }
                                             }
                                             _ => {}
                                         }
@@ -479,86 +406,13 @@ async fn connection_task(
     }
 }
 
-async fn snapshot_task(symbol: String, tx: mpsc::Sender<String>) {
-    let client = match http_client::builder().build() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(error=%e, "binance snapshot http client");
-            return;
-        }
-    };
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-    loop {
-        let url = format!(
-            "https://api.binance.us/api/v3/depth?symbol={}&limit=1000",
-            symbol.to_uppercase()
-        );
-        match client.get(&url).send().await {
-            Ok(resp) => match resp.json::<serde_json::Value>().await {
-                Ok(v) => {
-                    let bids = v
-                        .get("bids")
-                        .and_then(|b| b.as_array())
-                        .cloned()
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter_map(|lvl| {
-                            let p = lvl.get(0)?.as_str()?.to_string();
-                            let q = lvl.get(1)?.as_str()?.to_string();
-                            Some([p, q])
-                        })
-                        .collect::<Vec<[String; 2]>>();
-                    let asks = v
-                        .get("asks")
-                        .and_then(|b| b.as_array())
-                        .cloned()
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter_map(|lvl| {
-                            let p = lvl.get(0)?.as_str()?.to_string();
-                            let q = lvl.get(1)?.as_str()?.to_string();
-                            Some([p, q])
-                        })
-                        .collect::<Vec<[String; 2]>>();
-                    let sym = CanonicalService::canonical_pair("binance", &symbol)
-                        .unwrap_or_else(|| symbol.clone());
-                    let ts = chrono::Utc::now().timestamp_millis();
-                    let line = serde_json::json!({
-                        "agent": "binance",
-                        "type": "snapshot",
-                        "s": sym,
-                        "bids": bids,
-                        "asks": asks,
-                        "ts": ts
-                    })
-                    .to_string();
-                    let _ = tx.send(line).await;
-                }
-                Err(e) => {
-                    tracing::error!(error=%e, symbol=%symbol, "snapshot parse failed");
-                }
-            },
-            Err(e) => {
-                tracing::error!(error=%e, symbol=%symbol, "snapshot failed");
-            }
-        }
-        interval.tick().await;
-    }
-}
-
 async fn send_subscribe(
     ws: &mut WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>,
     symbols: &[String],
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     let params = symbols
         .iter()
-        .flat_map(|s| {
-            [
-                format!("{}@trade", s),
-                format!("{}@depth@100ms", s),
-                format!("{}@bookTicker", s),
-            ]
-        })
+        .map(|s| format!("{}@trade", s))
         .collect::<Vec<_>>();
     let sub_msg = serde_json::json!({
         "method": "SUBSCRIBE",
@@ -577,13 +431,7 @@ async fn send_unsubscribe(
     }
     let params = symbols
         .iter()
-        .flat_map(|s| {
-            [
-                format!("{}@trade", s),
-                format!("{}@depth@100ms", s),
-                format!("{}@bookTicker", s),
-            ]
-        })
+        .map(|s| format!("{}@trade", s))
         .collect::<Vec<_>>();
     let msg = serde_json::json!({
         "method": "UNSUBSCRIBE",

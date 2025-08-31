@@ -12,65 +12,9 @@ pub struct Cli {
     #[arg(short, long)]
     pub config: Option<String>,
 
-    /// Output sink type (stdout, file)
-    #[arg(long, default_value = "stdout")]
-    pub sink: String,
-
-    /// Output file path
-    #[arg(long)]
-    pub file_path: Option<String>,
-
     /// Enable trade feeds
     #[arg(long)]
     pub trades: bool,
-
-    /// Enable level 2 diff order book feeds
-    #[arg(long)]
-    pub l2_diffs: bool,
-
-    /// Enable level 2 snapshot order book feeds
-    #[arg(long)]
-    pub l2_snapshots: bool,
-
-    /// Enable book ticker updates
-    #[arg(long)]
-    pub book_ticker: bool,
-
-    /// Enable rolling 24h ticker updates
-    #[arg(long)]
-    pub ticker_24h: bool,
-
-    /// Enable OHLCV candle data
-    #[arg(long)]
-    pub ohlcv: bool,
-
-    /// Enable index price feeds
-    #[arg(long)]
-    pub index_price: bool,
-
-    /// Enable mark price feeds
-    #[arg(long)]
-    pub mark_price: bool,
-
-    /// Enable funding rates
-    #[arg(long)]
-    pub funding_rates: bool,
-
-    /// Enable open interest data
-    #[arg(long)]
-    pub open_interest: bool,
-
-    /// Enable top DEX pool price feeds
-    #[arg(long)]
-    pub top_dex_pools: bool,
-
-    /// Enable news headline feeds
-    #[arg(long)]
-    pub news_headlines: bool,
-
-    /// Enable telemetry events
-    #[arg(long)]
-    pub telemetry: bool,
 
     /// Agent specifications (e.g. binance:btcusdt)
     pub specs: Vec<String>,
@@ -107,11 +51,6 @@ pub struct Settings {
     pub coinbase_api_key: Option<String>,
     #[serde(default)]
     pub coinbase_api_secret: Option<String>,
-    #[serde(default = "default_sink")]
-    pub sink: String,
-    #[serde(default)]
-    pub file_path: Option<String>,
-
     #[serde(default)]
     pub trades: bool,
     #[serde(default)]
@@ -140,6 +79,7 @@ pub struct Settings {
 
 fn default_sink() -> String {
     "stdout".into()
+=======
 }
 
 fn default_binance_options_poll_interval_secs() -> u64 {
@@ -174,8 +114,6 @@ impl Default for Settings {
             binance_api_secret: None,
             coinbase_api_key: None,
             coinbase_api_secret: None,
-            sink: default_sink(),
-            file_path: None,
             trades: false,
             l2_diffs: false,
             l2_snapshots: false,
@@ -213,7 +151,6 @@ impl Settings {
             .set_default("coinbase_max_reconnect_delay_secs", 30)?
             .set_default("coinbase_ohlcv_poll_interval_secs", 60)?
             .set_default("coinbase_ohlcv_intervals", vec![60])?
-            .set_default("sink", "stdout")?
             .set_default("trades", false)?
             .set_default("l2_diffs", false)?
             .set_default("l2_snapshots", false)?
@@ -232,11 +169,6 @@ impl Settings {
         }
         let cfg = builder.build()?;
         let mut settings: Settings = cfg.try_deserialize()?;
-        settings.sink = cli.sink.clone();
-
-        if let Some(p) = &cli.file_path {
-            settings.file_path = Some(p.clone());
-        }
         // populate API keys from environment if not set in config
         settings.binance_api_key = settings
             .binance_api_key
@@ -262,6 +194,9 @@ impl Settings {
         settings.top_dex_pools = settings.top_dex_pools || cli.top_dex_pools;
         settings.news_headlines = settings.news_headlines || cli.news_headlines;
         settings.telemetry = settings.telemetry || cli.telemetry;
+        settings.binance_futures_rest_url =
+            settings.binance_futures_rest_url.filter(|s| !s.is_empty());
+        settings.binance_futures_ws_url = settings.binance_futures_ws_url.filter(|s| !s.is_empty());
         Ok(settings)
     }
 }

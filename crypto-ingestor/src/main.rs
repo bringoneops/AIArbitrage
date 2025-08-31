@@ -1,10 +1,8 @@
 mod agent;
 mod agents;
-mod clock;
 mod config;
 mod error;
 mod http_client;
-mod metadata;
 mod parse;
 mod sink;
 
@@ -13,7 +11,7 @@ use canonicalizer::CanonicalService;
 use clap::Parser;
 use config::{Cli, Settings};
 use error::IngestorError;
-use sink::{DynSink, FileSink, StdoutSink};
+use sink::{DynSink, StdoutSink};
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
@@ -42,30 +40,10 @@ async fn main() -> Result<(), IngestorError> {
     }
     let settings = Settings::load(&cli)?;
 
-    clock::spawn_clock_sync();
-
     // initialise output sink
-    let sink: DynSink = match settings.sink.as_str() {
-        "stdout" => Arc::new(StdoutSink::new()),
-        "file" => {
-            let path = settings
-                .file_path
-                .as_ref()
-                .ok_or_else(|| IngestorError::Other("file_path not set".into()))?;
-            Arc::new(FileSink::new(path).await.map_err(IngestorError::Io)?)
-        }
-        other => {
-            return Err(IngestorError::Other(format!(
-                "unknown sink type: {}",
-                other
-            )));
-        }
-    };
+    let sink: DynSink = Arc::new(StdoutSink::new());
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-
-    // periodically refresh reference data
-    tokio::spawn(metadata::run(shutdown_rx.clone(), sink.clone()));
 
     // spawn canonicalizer process
     let exe = std::env::current_exe()?;
