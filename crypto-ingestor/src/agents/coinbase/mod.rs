@@ -7,11 +7,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, Web
 
 use super::{shared_symbols, AgentFactory};
 use crate::{
-    agent::Agent,
-    config::Settings,
-    error::IngestorError,
-    http_client,
-    parse::parse_decimal_str,
+    agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
 };
 use canonicalizer::CanonicalService;
 
@@ -264,6 +260,176 @@ async fn connection_task(
                                             }).to_string();
                                             if tx.send(line).await.is_err() {
                                                 break;
+                                        match typ {
+                                            "match" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                // Missing or non-positive trade IDs are represented as JSON null.
+                                                let trade_id = v
+                                                    .get("trade_id")
+                                                    .and_then(|id| id.as_i64())
+                                                    .filter(|id| *id > 0);
+                                                let price = v
+                                                    .get("price")
+                                                    .and_then(|p| p.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let size = v
+                                                    .get("size")
+                                                    .and_then(|q| q.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let ts = v
+                                                    .get("time")
+                                                    .and_then(|t| t.as_str())
+                                                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                    .map(|dt| dt.timestamp_millis())
+                                                    .unwrap_or_default();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "trade",
+                                                    "s": sym,
+                                                    "t": trade_id,
+                                                    "p": price,
+                                                    "q": size,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_err() {
+                                                    let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                    let sym = CanonicalService::canonical_pair("coinbase", raw)
+                                                        .unwrap_or_else(|| raw.to_string());
+                                                    // Missing or non-positive trade IDs are represented as JSON null.
+                                                    let trade_id = v
+                                                        .get("trade_id")
+                                                        .and_then(|id| id.as_i64())
+                                                        .filter(|id| *id > 0);
+                                                    if let Some(id) = trade_id {
+                                                        if let Some(last) = last_trade_ids.get_mut(&sym) {
+                                                            *last = id;
+                                                        } else {
+                                                            last_trade_ids.insert(sym.clone(), id);
+                                                        }
+                                                    }
+                                                    let price = match v
+                                                        .get("price")
+                                                        .and_then(|p| p.as_str())
+                                                        .and_then(parse_decimal_str)
+                                                    {
+                                                        Some(p) => p,
+                                                        None => {
+                                                            "?".to_string()
+                                                        }
+                                                    };
+                                                    let size = match v
+                                                        .get("size")
+                                                        .and_then(|q| q.as_str())
+                                                        .and_then(parse_decimal_str)
+                                                    {
+                                                        Some(q) => q,
+                                                        None => {
+                                                            "?".to_string()
+                                                        }
+                                                    };
+                                                    let ts = v
+                                                        .get("time")
+                                                        .and_then(|t| t.as_str())
+                                                        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                        .map(|dt| dt.timestamp_millis())
+                                                        .unwrap_or_default();
+                                                    let line = serde_json::json!({
+                                                        "agent": "coinbase",
+                                                        "type": "trade",
+                                                        "s": sym,
+                                                        "t": trade_id,
+                                                        "p": price,
+                                                        "q": size,
+                                                        "ts": ts
+                                                    })
+                                                    .to_string();
+                                                    if tx.send(line).await.is_err() {
+                                                        break;
+                                                    }
+                                                }
+                                            },
+                                            "l2update" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let mut bids = Vec::new();
+                                                let mut asks = Vec::new();
+                                                if let Some(changes) = v.get("changes").and_then(|c| c.as_array()) {
+                                                    for c in changes {
+                                                        if let (Some(side), Some(p), Some(sz)) = (
+                                                            c.get(0).and_then(|s| s.as_str()),
+                                                            c.get(1).and_then(|p| p.as_str()),
+                                                            c.get(2).and_then(|q| q.as_str()),
+                                                        ) {
+                                                            let price = parse_decimal_str(p);
+                                                            let qty = parse_decimal_str(sz);
+                                                            if let (Some(price), Some(qty)) = (price, qty) {
+                                                                if side == "buy" {
+                                                                    bids.push([price, qty]);
+                                                                } else {
+                                                                    asks.push([price, qty]);
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                let ts = v
+                                                    .get("time")
+                                                    .and_then(|t| t.as_str())
+                                                    .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                                                    .map(|dt| dt.timestamp_millis())
+                                                    .unwrap_or_default();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "l2_diff",
+                                                    "s": sym,
+                                                    "bids": bids,
+                                                    "asks": asks,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                } else { break; }
+                                            }
+                                            "snapshot" => {
+                                                let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
+                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
+                                                let bids = v
+                                                    .get("bids")
+                                                    .and_then(|b| b.as_array())
+                                                    .cloned()
+                                                    .unwrap_or_default()
+                                                    .into_iter()
+                                                    .filter_map(|lvl| {
+                                                        let p = lvl.get(0)?.as_str()?.to_string();
+                                                        let q = lvl.get(1)?.as_str()?.to_string();
+                                                        Some([p, q])
+                                                    })
+                                                    .collect::<Vec<[String;2]>>();
+                                                let asks = v
+                                                    .get("asks")
+                                                    .and_then(|a| a.as_array())
+                                                    .cloned()
+                                                    .unwrap_or_default()
+                                                    .into_iter()
+                                                    .filter_map(|lvl| {
+                                                        let p = lvl.get(0)?.as_str()?.to_string();
+                                                        let q = lvl.get(1)?.as_str()?.to_string();
+                                                        Some([p, q])
+                                                    })
+                                                    .collect::<Vec<[String;2]>>();
+                                                let ts = chrono::Utc::now().timestamp_millis();
+                                                let line = serde_json::json!({
+                                                    "agent": "coinbase",
+                                                    "type": "snapshot",
+                                                    "s": sym,
+                                                    "bids": bids,
+                                                    "asks": asks,
+                                                    "ts": ts
+                                                }).to_string();
+                                                if tx.send(line).await.is_ok() {
+                                                } else { break; }
                                             }
                                         }
                                     } else {

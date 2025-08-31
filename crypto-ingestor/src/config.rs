@@ -12,14 +12,6 @@ pub struct Cli {
     #[arg(short, long)]
     pub config: Option<String>,
 
-    /// Output sink type (stdout, file)
-    #[arg(long, default_value = "stdout")]
-    pub sink: String,
-
-    /// Output file path
-    #[arg(long)]
-    pub file_path: Option<String>,
-
     /// Enable trade feeds
     #[arg(long)]
     pub trades: bool,
@@ -63,17 +55,8 @@ pub struct Settings {
     pub coinbase_api_key: Option<String>,
     #[serde(default)]
     pub coinbase_api_secret: Option<String>,
-    #[serde(default = "default_sink")]
-    pub sink: String,
-    #[serde(default)]
-    pub file_path: Option<String>,
-
     #[serde(default)]
     pub trades: bool,
-}
-
-fn default_sink() -> String {
-    "stdout".into()
 }
 
 fn default_binance_options_poll_interval_secs() -> u64 {
@@ -110,8 +93,6 @@ impl Default for Settings {
             binance_api_secret: None,
             coinbase_api_key: None,
             coinbase_api_secret: None,
-            sink: default_sink(),
-            file_path: None,
             trades: false,
         }
     }
@@ -140,7 +121,6 @@ impl Settings {
             .set_default("coinbase_max_reconnect_delay_secs", 30)?
             .set_default("coinbase_ohlcv_poll_interval_secs", 60)?
             .set_default("coinbase_ohlcv_intervals", vec![60])?
-            .set_default("sink", "stdout")?
             .set_default("trades", false)?
             .add_source(config::Environment::with_prefix("INGESTOR").separator("_"));
         if let Some(path) = &cli.config {
@@ -148,11 +128,6 @@ impl Settings {
         }
         let cfg = builder.build()?;
         let mut settings: Settings = cfg.try_deserialize()?;
-        settings.sink = cli.sink.clone();
-
-        if let Some(p) = &cli.file_path {
-            settings.file_path = Some(p.clone());
-        }
         // populate API keys from environment if not set in config
         settings.binance_api_key = settings
             .binance_api_key
