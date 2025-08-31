@@ -1,7 +1,5 @@
 use futures_util::{SinkExt, StreamExt};
 pub mod metadata;
-pub mod ohlcv;
-pub mod options;
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
