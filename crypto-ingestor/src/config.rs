@@ -83,10 +83,6 @@ pub struct Settings {
     pub binance_refresh_interval_mins: u64,
     pub binance_max_reconnect_delay_secs: u64,
     #[serde(default)]
-    pub binance_futures_rest_url: Option<String>,
-    #[serde(default)]
-    pub binance_futures_ws_url: Option<String>,
-    #[serde(default)]
     pub binance_options_rest_url: String,
     #[serde(default)]
     pub binance_options_symbols: Vec<String>,
@@ -135,8 +131,6 @@ pub struct Settings {
     #[serde(default)]
     pub funding_rates: bool,
     #[serde(default)]
-    pub open_interest: bool,
-    #[serde(default)]
     pub top_dex_pools: bool,
     #[serde(default)]
     pub news_headlines: bool,
@@ -166,8 +160,6 @@ impl Default for Settings {
             binance_ws_url: String::new(),
             binance_refresh_interval_mins: 60,
             binance_max_reconnect_delay_secs: 30,
-            binance_futures_rest_url: None,
-            binance_futures_ws_url: None,
             binance_options_rest_url: String::new(),
             binance_options_symbols: Vec::new(),
             binance_options_poll_interval_secs: 60,
@@ -193,7 +185,6 @@ impl Default for Settings {
             index_price: false,
             mark_price: false,
             funding_rates: false,
-            open_interest: false,
             top_dex_pools: false,
             news_headlines: false,
             telemetry: false,
@@ -207,8 +198,6 @@ impl Settings {
             .set_default("binance_ws_url", "wss://stream.binance.us:9443/ws")?
             .set_default("binance_refresh_interval_mins", 60)?
             .set_default("binance_max_reconnect_delay_secs", 30)?
-            .set_default("binance_futures_rest_url", "https://fapi.binance.com")?
-            .set_default("binance_futures_ws_url", "wss://fstream.binance.com")?
             .set_default(
                 "binance_options_rest_url",
                 "https://eapi.binance.us/eapi/v1",
@@ -234,7 +223,6 @@ impl Settings {
             .set_default("index_price", false)?
             .set_default("mark_price", false)?
             .set_default("funding_rates", false)?
-            .set_default("open_interest", false)?
             .set_default("top_dex_pools", false)?
             .set_default("news_headlines", false)?
             .set_default("telemetry", false)?
@@ -271,13 +259,9 @@ impl Settings {
         settings.index_price = settings.index_price || cli.index_price;
         settings.mark_price = settings.mark_price || cli.mark_price;
         settings.funding_rates = settings.funding_rates || cli.funding_rates;
-        settings.open_interest = settings.open_interest || cli.open_interest;
         settings.top_dex_pools = settings.top_dex_pools || cli.top_dex_pools;
         settings.news_headlines = settings.news_headlines || cli.news_headlines;
         settings.telemetry = settings.telemetry || cli.telemetry;
-        settings.binance_futures_rest_url =
-            settings.binance_futures_rest_url.filter(|s| !s.is_empty());
-        settings.binance_futures_ws_url = settings.binance_futures_ws_url.filter(|s| !s.is_empty());
         Ok(settings)
     }
 }
