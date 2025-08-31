@@ -16,54 +16,6 @@ pub struct Cli {
     #[arg(long)]
     pub trades: bool,
 
-    /// Enable level 2 diff order book feeds
-    #[arg(long)]
-    pub l2_diffs: bool,
-
-    /// Enable level 2 snapshot order book feeds
-    #[arg(long)]
-    pub l2_snapshots: bool,
-
-    /// Enable book ticker updates
-    #[arg(long)]
-    pub book_ticker: bool,
-
-    /// Enable rolling 24h ticker updates
-    #[arg(long)]
-    pub ticker_24h: bool,
-
-    /// Enable OHLCV candle data
-    #[arg(long)]
-    pub ohlcv: bool,
-
-    /// Enable index price feeds
-    #[arg(long)]
-    pub index_price: bool,
-
-    /// Enable mark price feeds
-    #[arg(long)]
-    pub mark_price: bool,
-
-    /// Enable funding rates
-    #[arg(long)]
-    pub funding_rates: bool,
-
-    /// Enable open interest data
-    #[arg(long)]
-    pub open_interest: bool,
-
-    /// Enable top DEX pool price feeds
-    #[arg(long)]
-    pub top_dex_pools: bool,
-
-    /// Enable news headline feeds
-    #[arg(long)]
-    pub news_headlines: bool,
-
-    /// Enable telemetry events
-    #[arg(long)]
-    pub telemetry: bool,
-
     /// Agent specifications (e.g. binance:btcusdt)
     pub specs: Vec<String>,
 }
@@ -105,30 +57,6 @@ pub struct Settings {
     pub coinbase_api_secret: Option<String>,
     #[serde(default)]
     pub trades: bool,
-    #[serde(default)]
-    pub l2_diffs: bool,
-    #[serde(default)]
-    pub l2_snapshots: bool,
-    #[serde(default)]
-    pub book_ticker: bool,
-    #[serde(default)]
-    pub ticker_24h: bool,
-    #[serde(default)]
-    pub ohlcv: bool,
-    #[serde(default)]
-    pub index_price: bool,
-    #[serde(default)]
-    pub mark_price: bool,
-    #[serde(default)]
-    pub funding_rates: bool,
-    #[serde(default)]
-    pub open_interest: bool,
-    #[serde(default)]
-    pub top_dex_pools: bool,
-    #[serde(default)]
-    pub news_headlines: bool,
-    #[serde(default)]
-    pub telemetry: bool,
 }
 
 fn default_binance_options_poll_interval_secs() -> u64 {
@@ -166,18 +94,6 @@ impl Default for Settings {
             coinbase_api_key: None,
             coinbase_api_secret: None,
             trades: false,
-            l2_diffs: false,
-            l2_snapshots: false,
-            book_ticker: false,
-            ticker_24h: false,
-            ohlcv: false,
-            index_price: false,
-            mark_price: false,
-            funding_rates: false,
-            open_interest: false,
-            top_dex_pools: false,
-            news_headlines: false,
-            telemetry: false,
         }
     }
 }
@@ -206,18 +122,6 @@ impl Settings {
             .set_default("coinbase_ohlcv_poll_interval_secs", 60)?
             .set_default("coinbase_ohlcv_intervals", vec![60])?
             .set_default("trades", false)?
-            .set_default("l2_diffs", false)?
-            .set_default("l2_snapshots", false)?
-            .set_default("book_ticker", false)?
-            .set_default("ticker_24h", false)?
-            .set_default("ohlcv", false)?
-            .set_default("index_price", false)?
-            .set_default("mark_price", false)?
-            .set_default("funding_rates", false)?
-            .set_default("open_interest", false)?
-            .set_default("top_dex_pools", false)?
-            .set_default("news_headlines", false)?
-            .set_default("telemetry", false)?
             .add_source(config::Environment::with_prefix("INGESTOR").separator("_"));
         if let Some(path) = &cli.config {
             builder = builder.add_source(config::File::with_name(path));
@@ -238,18 +142,6 @@ impl Settings {
             .coinbase_api_secret
             .or_else(|| std::env::var("COINBASE_API_SECRET").ok());
         settings.trades = settings.trades || cli.trades;
-        settings.l2_diffs = settings.l2_diffs || cli.l2_diffs;
-        settings.l2_snapshots = settings.l2_snapshots || cli.l2_snapshots;
-        settings.book_ticker = settings.book_ticker || cli.book_ticker;
-        settings.ticker_24h = settings.ticker_24h || cli.ticker_24h;
-        settings.ohlcv = settings.ohlcv || cli.ohlcv;
-        settings.index_price = settings.index_price || cli.index_price;
-        settings.mark_price = settings.mark_price || cli.mark_price;
-        settings.funding_rates = settings.funding_rates || cli.funding_rates;
-        settings.open_interest = settings.open_interest || cli.open_interest;
-        settings.top_dex_pools = settings.top_dex_pools || cli.top_dex_pools;
-        settings.news_headlines = settings.news_headlines || cli.news_headlines;
-        settings.telemetry = settings.telemetry || cli.telemetry;
         settings.binance_futures_rest_url =
             settings.binance_futures_rest_url.filter(|s| !s.is_empty());
         settings.binance_futures_ws_url = settings.binance_futures_ws_url.filter(|s| !s.is_empty());
