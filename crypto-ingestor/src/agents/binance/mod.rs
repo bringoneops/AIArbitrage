@@ -126,6 +126,48 @@ impl Agent for BinanceAgent {
                 connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
             }));
         }
+        // additional aggregated streams not tied to symbol subsets
+        if let Some(ws_url) = &self.futures_ws_url {
+            let shutdown_clone = shutdown.clone();
+            let tx_clone = out_tx.clone();
+            let url = ws_url.clone();
+            handles.push(tokio::spawn(async move {
+                mark_price_task(&url, shutdown_clone, tx_clone).await;
+            }));
+
+            let shutdown_clone = shutdown.clone();
+            let tx_clone = out_tx.clone();
+            let url = ws_url.clone();
+            handles.push(tokio::spawn(async move {
+                funding_rate_task(&url, shutdown_clone, tx_clone).await;
+            }));
+
+            if self.open_interest {
+                let shutdown_clone = shutdown.clone();
+                let tx_clone = out_tx.clone();
+                let url = ws_url.clone();
+                handles.push(tokio::spawn(async move {
+                    open_interest_task(&url, shutdown_clone, tx_clone).await;
+                }));
+            }
+
+            let shutdown_clone = shutdown.clone();
+            let tx_clone = out_tx.clone();
+            let url = ws_url.clone();
+            handles.push(tokio::spawn(async move {
+                liquidation_task(&url, shutdown_clone, tx_clone).await;
+            }));
+        }
+
+        if let Some(rest_url) = &self.futures_rest_url {
+            let symbols_clone = self.symbols.clone();
+            let shutdown_clone = shutdown.clone();
+            let tx_clone = out_tx.clone();
+            let url = rest_url.clone();
+            handles.push(tokio::spawn(async move {
+                term_structure_task(symbols_clone, &url, shutdown_clone, tx_clone).await;
+            }));
+        }
         for sym in self.symbols.clone() {
             let tx_clone = out_tx.clone();
             handles.push(tokio::spawn(async move {

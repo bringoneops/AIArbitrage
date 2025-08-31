@@ -83,7 +83,6 @@ impl Agent for CoinbaseAgent {
     ) -> Result<(), IngestorError> {
         let mut handle = None;
         let mut sym_tx = None;
-
         if !self.symbols.is_empty() {
             let (s_tx, rx) = tokio::sync::watch::channel(self.symbols.clone());
             sym_tx = Some(s_tx);
