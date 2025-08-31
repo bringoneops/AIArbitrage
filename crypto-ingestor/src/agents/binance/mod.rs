@@ -125,6 +125,12 @@ impl Agent for BinanceAgent {
                 connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
             }));
         }
+        for sym in self.symbols.clone() {
+            let tx_clone = out_tx.clone();
+            handles.push(tokio::spawn(async move {
+                snapshot_task(sym, tx_clone).await;
+            }));
+        }
 
         let mut refresh = tokio::time::interval(std::time::Duration::from_secs(
             60 * self.refresh_interval_mins,
@@ -355,7 +361,7 @@ async fn connection_task(
                                                     "p": px,
                                                     "q": qty,
                                                     "ts": ts
-                                                })
+                                                })<<<<<<< codex/remove-binanceagent-futures-fields-and-tasks
                                                 .to_string();
                                                 if tx.send(line).await.is_err() {
                                                     break;
