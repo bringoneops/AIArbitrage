@@ -87,8 +87,6 @@ impl Agent for CoinbaseAgent {
     ) -> Result<(), IngestorError> {
         let mut handle = None;
         let mut sym_tx = None;
-        let mut snap_handles = Vec::new();
-
         if !self.symbols.is_empty() {
             let (s_tx, rx) = tokio::sync::watch::channel(self.symbols.clone());
             sym_tx = Some(s_tx);
@@ -99,12 +97,6 @@ impl Agent for CoinbaseAgent {
             handle = Some(tokio::spawn(async move {
                 connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
             }));
-            for sym in self.symbols.clone() {
-                let tx_snap = tx.clone();
-                snap_handles.push(tokio::spawn(async move {
-                    snapshot_task(sym, tx_snap).await;
-                }));
-            }
         }
 
         let mut refresh = tokio::time::interval(std::time::Duration::from_secs(
@@ -163,9 +155,6 @@ impl Agent for CoinbaseAgent {
             drop(tx_sym);
         }
         if let Some(h) = handle {
-            let _ = h.await;
-        }
-        for h in snap_handles {
             let _ = h.await;
         }
 
@@ -536,69 +525,3 @@ async fn send_unsubscribe(
     ws.send(Message::Text(msg.to_string())).await
 }
 
-async fn snapshot_task(symbol: String, tx: mpsc::Sender<String>) {
-    let client = match http_client::builder().build() {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::error!(error=%e, "coinbase snapshot http client");
-            return;
-        }
-    };
-    let mut interval = tokio::time::interval(std::time::Duration::from_secs(60));
-    loop {
-        let url = format!(
-            "https://api.exchange.coinbase.com/products/{}/book?level=2",
-            symbol
-        );
-        match client.get(&url).send().await {
-            Ok(resp) => match resp.json::<serde_json::Value>().await {
-                Ok(v) => {
-                    let bids = v
-                        .get("bids")
-                        .and_then(|b| b.as_array())
-                        .cloned()
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter_map(|lvl| {
-                            let p = lvl.get(0)?.as_str()?.to_string();
-                            let q = lvl.get(1)?.as_str()?.to_string();
-                            Some([p, q])
-                        })
-                        .collect::<Vec<[String; 2]>>();
-                    let asks = v
-                        .get("asks")
-                        .and_then(|a| a.as_array())
-                        .cloned()
-                        .unwrap_or_default()
-                        .into_iter()
-                        .filter_map(|lvl| {
-                            let p = lvl.get(0)?.as_str()?.to_string();
-                            let q = lvl.get(1)?.as_str()?.to_string();
-                            Some([p, q])
-                        })
-                        .collect::<Vec<[String; 2]>>();
-                    let sym = CanonicalService::canonical_pair("coinbase", &symbol)
-                        .unwrap_or_else(|| symbol.clone());
-                    let ts = chrono::Utc::now().timestamp_millis();
-                    let line = serde_json::json!({
-                        "agent": "coinbase",
-                        "type": "snapshot",
-                        "s": sym,
-                        "bids": bids,
-                        "asks": asks,
-                        "ts": ts
-                    })
-                    .to_string();
-                    let _ = tx.send(line).await;
-                }
-                Err(e) => {
-                    tracing::error!(error=%e, symbol=%symbol, "snapshot parse failed");
-                }
-            },
-            Err(e) => {
-                tracing::error!(error=%e, symbol=%symbol, "snapshot failed");
-            }
-        }
-        interval.tick().await;
-    }
-}
