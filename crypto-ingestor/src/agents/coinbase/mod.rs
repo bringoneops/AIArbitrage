@@ -1,5 +1,4 @@
 use futures_util::{SinkExt, StreamExt};
-pub mod metadata;
 pub mod ohlcv;
 use std::collections::HashSet;
 use tokio::sync::mpsc;

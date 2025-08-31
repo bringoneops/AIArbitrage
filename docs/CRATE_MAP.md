@@ -20,6 +20,7 @@ clap 4, config 0.13, rust_decimal 1, thiserror 1.
     - `binance`, `coinbase` – websocket agents emitting raw frames (use `CanonicalService`).
 - `sink` – `OutputSink` trait with `StdoutSink`, `FileSink`.
 - `config` – CLI & settings controlling which feeds run.
+- `clock`, `http_client`, `parse`, `error` – helpers.
 - `http_client`, `metadata`, `parse`, `error` – helpers.
 
 *Ingest implementations*: `agent` and `agents/*`.

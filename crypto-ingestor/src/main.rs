@@ -3,7 +3,6 @@ mod agents;
 mod config;
 mod error;
 mod http_client;
-mod metadata;
 mod parse;
 mod sink;
 
@@ -45,9 +44,6 @@ async fn main() -> Result<(), IngestorError> {
     let sink: DynSink = Arc::new(StdoutSink::new());
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-
-    // periodically refresh reference data
-    tokio::spawn(metadata::run(shutdown_rx.clone(), sink.clone()));
 
     // spawn canonicalizer process
     let exe = std::env::current_exe()?;
