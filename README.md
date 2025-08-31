@@ -3,7 +3,7 @@
 Simple cryptocurrency data ingestor demonstrating async Rust agents. Both
 Binance and Coinbase agents stream market data via WebSockets.
 
-> **Note:** Development builds disable TLS certificate verification; do not use in production.
+> **Note:** TLS certificate verification is enforced in all builds by default.
 
 This repository is organised as a Cargo workspace containing several crates:
 

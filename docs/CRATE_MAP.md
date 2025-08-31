@@ -37,7 +37,7 @@ clap 4, config 0.13, rust_decimal 1, thiserror 1.
 *Modules*:
 - `lib` – `CanonicalService` and event types (`L2Diff`, etc.).
 - `events` – additional canonical structs (`Bar`, `Order`, ...).
-- `http_client` – helper to build TLS HTTP client.
+- `http_client` – helper to build TLS HTTP client with certificate verification.
 
 *Normalization implementations*: `CanonicalService::canonical_pair`.
 
