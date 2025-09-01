@@ -45,6 +45,18 @@ default prints the `agent`, `s`, `p`, and `q` fields in aligned tab-separated
 columns for easy reading. Use the `--json` flag to emit the modified JSON
 records, preserving the previous behaviour.
 
+Custom exchanges can be supported by registering a canonicalizer at runtime:
+
+```rust
+use canonicalizer::CanonicalService;
+
+fn normalize_kraken(pair: &str) -> Option<String> {
+    Some(pair.to_uppercase())
+}
+
+CanonicalService::register_exchange("kraken", normalize_kraken);
+```
+
 The ingestor spawns this canonicalizer automatically so all output is already
 canonicalized:
 

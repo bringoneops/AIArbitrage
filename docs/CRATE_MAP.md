@@ -39,6 +39,7 @@ clap 4, config 0.13, rust_decimal 1, thiserror 1.
 - `events` – additional canonical structs (`Bar`, `Order`, ...).
 - `http_client` – helper to build TLS HTTP client with certificate verification.
 
-*Normalization implementations*: `CanonicalService::canonical_pair`.
+*Normalization implementations*: `CanonicalService::canonical_pair` dispatched
+through a registry populated via `register_exchange`.
 
 *Direct callers*: `crypto-ingestor` agents.
