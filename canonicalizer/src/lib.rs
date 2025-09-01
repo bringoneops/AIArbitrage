@@ -26,7 +26,7 @@ pub use events::{
 };
 
 use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -34,6 +34,7 @@ use tracing::warn;
 pub struct CanonicalService;
 
 /// Cached list of Binance quote assets. Populated at startup via [`init`].
+static BINANCE_QUOTES: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
 static BINANCE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
 /// Cached list of Coinbase quote assets. Populated at startup via [`init`].
 static COINBASE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
@@ -43,6 +44,57 @@ impl CanonicalService {
     /// quote assets for supported exchanges from their public endpoints (unless
     /// provided via environment variables).
     ///
+    /// If `BINANCE_QUOTES_REFRESH_INTERVAL_SECS` is set, a background task will
+    /// periodically refresh the cached quotes.
+    ///
+    /// Network errors are logged and fall back to a small built-in list.
+    pub async fn init() {
+        if BINANCE_QUOTES.get().is_some() {
+            return;
+        }
+
+        let quotes = Self::load_binance_quotes().await;
+        let _ = BINANCE_QUOTES.set(RwLock::new(quotes));
+
+        Self::maybe_spawn_binance_refresher();
+    }
+
+    async fn load_binance_quotes() -> Vec<String> {
+        if let Ok(env) = std::env::var("BINANCE_QUOTES") {
+            return Self::parse_env_quotes(&env);
+        }
+
+        match Self::fetch_binance_quotes().await {
+            Ok(quotes) if !quotes.is_empty() => quotes,
+            Ok(_) => Self::default_binance_quotes(),
+            Err(e) => {
+                warn!("failed to fetch Binance quotes: {}", e);
+                Self::default_binance_quotes()
+            }
+        }
+    }
+
+    /// Re-fetch the Binance quote assets and replace the cached set.
+    pub async fn refresh_binance_quotes() {
+        let quotes = Self::load_binance_quotes().await;
+        let lock = Self::binance_quotes();
+        if let Ok(mut guard) = lock.write() {
+            *guard = quotes;
+        }
+    }
+
+    /// Spawn a background task to refresh Binance quotes if configured via
+    /// the `BINANCE_QUOTES_REFRESH_INTERVAL_SECS` environment variable.
+    pub fn maybe_spawn_binance_refresher() {
+        if let Ok(val) = std::env::var("BINANCE_QUOTES_REFRESH_INTERVAL_SECS") {
+            if let Ok(secs) = val.parse::<u64>() {
+                tokio::spawn(async move {
+                    let mut int = tokio::time::interval(std::time::Duration::from_secs(secs));
+                    loop {
+                        int.tick().await;
+                        CanonicalService::refresh_binance_quotes().await;
+                    }
+                });
     /// Network errors are logged and fall back to small built-in lists.
     pub async fn init() {
         if BINANCE_QUOTES.get().is_none() {
@@ -97,8 +149,8 @@ impl CanonicalService {
         }
     }
 
-    fn binance_quotes() -> &'static Vec<String> {
-        BINANCE_QUOTES.get_or_init(Self::default_binance_quotes)
+    fn binance_quotes() -> &'static RwLock<Vec<String>> {
+        BINANCE_QUOTES.get_or_init(|| RwLock::new(Self::default_binance_quotes()))
     }
 
     fn coinbase_quotes() -> &'static Vec<String> {
@@ -173,7 +225,8 @@ impl CanonicalService {
 
     fn canonicalize_binance(symbol: &str) -> Option<String> {
         let lower = symbol.to_lowercase();
-        for q in Self::binance_quotes() {
+        let quotes = Self::binance_quotes().read().ok()?;
+        for q in quotes.iter() {
             if lower.ends_with(q) {
                 let base = &lower[..lower.len() - q.len()];
                 if base.is_empty() {
@@ -209,7 +262,10 @@ impl CanonicalService {
     pub fn set_binance_quotes(quotes: Vec<&str>) {
         let mut qs: Vec<String> = quotes.into_iter().map(|s| s.to_lowercase()).collect();
         qs.sort_by(|a, b| b.len().cmp(&a.len()));
-        let _ = BINANCE_QUOTES.set(qs);
+        let lock = BINANCE_QUOTES.get_or_init(|| RwLock::new(Vec::new()));
+        if let Ok(mut guard) = lock.write() {
+            *guard = qs;
+        }
     }
 
     #[cfg(test)]
