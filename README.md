@@ -92,9 +92,10 @@ Fields:
 - `q` – quantity as a string
 - `ts` – trade timestamp in milliseconds since Unix epoch
 
-When either `binance:all` or `coinbase:all` agents are used, both exchanges
-subscribe only to USD-quoted pairs common to both platforms so their symbol
-sets align.
+When either `binance:shared` or `coinbase:shared` agents are used, both
+exchanges subscribe only to USD-quoted pairs common to both platforms so their
+symbol sets align. Use `binance:all` or `coinbase:all` to stream every tradable
+symbol on the respective exchange.
 
 
 ## Bar aggregation

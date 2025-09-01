@@ -206,6 +206,14 @@ pub struct BinanceFactory;
 impl AgentFactory for BinanceFactory {
     async fn create(&self, spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>> {
         let symbols = if spec.is_empty() || spec.eq_ignore_ascii_case("all") {
+            match fetch_all_symbols().await {
+                Ok(v) => Some(v),
+                Err(e) => {
+                    tracing::error!(error=%e, "failed to fetch binance symbols");
+                    return None;
+                }
+            }
+        } else if spec.eq_ignore_ascii_case("shared") {
             match shared_symbols().await {
                 Ok((b, _)) => Some(b),
                 Err(e) => {

@@ -55,7 +55,7 @@ async fn shared_symbols() -> Result<(Vec<String>, Vec<String>), IngestorError> {
 }
 
 /// Factory: "<agent>:<comma-separated-args>"
-/// e.g., "binance:btcusdt,ethusdt" or "binance:all"
+/// e.g., "binance:btcusdt,ethusdt", "binance:all", or "binance:shared"
 pub async fn make_agent(spec: &str, cfg: &Settings) -> Option<Box<dyn Agent>> {
     let (name, args) = match spec.split_once(':') {
         Some((n, a)) => (n.trim().to_lowercase(), a.trim().to_string()),

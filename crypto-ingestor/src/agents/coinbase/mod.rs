@@ -435,6 +435,14 @@ impl AgentFactory for CoinbaseFactory {
         let symbols = if spec.is_empty() {
             vec!["BTC-USD".to_string()]
         } else if spec.eq_ignore_ascii_case("all") {
+            match fetch_all_symbols().await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(error=%e, "failed to fetch coinbase symbols");
+                    return None;
+                }
+            }
+        } else if spec.eq_ignore_ascii_case("shared") {
             match shared_symbols().await {
                 Ok((_, c)) => c,
                 Err(e) => {
