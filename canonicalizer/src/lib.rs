@@ -14,8 +14,19 @@
 //! (`1`, `true`, `yes`). Disabling certificate verification is strongly
 //! discouraged for production use.
 //!
-//! Additional exchanges can be supported by extending
-//! [`CanonicalService::canonical_pair`].
+//! Additional exchanges can be supported without modifying this crate by
+//! registering custom canonicalizers via
+//! [`CanonicalService::register_exchange`]:
+//!
+//! ```no_run
+//! use canonicalizer::CanonicalService;
+//!
+//! fn normalize_kraken(pair: &str) -> Option<String> {
+//!     Some(pair.to_uppercase())
+//! }
+//!
+//! CanonicalService::register_exchange("kraken", normalize_kraken);
+//! ```
 
 pub mod events;
 mod http_client;
@@ -25,8 +36,8 @@ pub use events::{
     OptionSurfacePoint, Side, Symbol, Trade, TradeMeta,
 };
 
-use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::collections::{HashMap, HashSet};
+use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -35,6 +46,13 @@ pub struct CanonicalService;
 
 /// Cached list of Binance quote assets. Populated at startup via [`init`].
 static BINANCE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
+
+/// Registered canonicalizers for each exchange. Populated with default
+/// implementations for supported exchanges and extendable at runtime via
+/// [`register_exchange`].
+static CANONICALIZERS: OnceLock<RwLock<HashMap<String, Canonicalizer>>> = OnceLock::new();
+
+type Canonicalizer = fn(&str) -> Option<String>;
 
 impl CanonicalService {
     /// Initialise any resources required by the service. Currently this loads
@@ -67,15 +85,40 @@ impl CanonicalService {
         }
     }
 
+    fn registry() -> &'static RwLock<HashMap<String, Canonicalizer>> {
+        CANONICALIZERS.get_or_init(|| {
+            let mut map: HashMap<String, Canonicalizer> = HashMap::new();
+            map.insert(
+                "binance".to_string(),
+                Self::canonicalize_binance as Canonicalizer,
+            );
+            map.insert(
+                "coinbase".to_string(),
+                Self::canonicalize_coinbase_wrapper as Canonicalizer,
+            );
+            RwLock::new(map)
+        })
+    }
+
+    /// Register a canonicalizer for an additional exchange. This allows third
+    /// parties to plug in normalisation logic without modifying the core
+    /// library.
+    pub fn register_exchange(name: &str, func: Canonicalizer) {
+        let mut reg = Self::registry().write().expect("registry poisoned");
+        reg.insert(name.to_lowercase(), func);
+    }
+
     /// Convert `pair` as used by `exchange` into the canonical `BASE-QUOTE`
     /// representation. Returns `None` if the exchange is unknown or the pair
-    /// cannot be parsed.
+    /// cannot be parsed. New exchanges can register their own canonicalizers
+    /// via [`register_exchange`].
     pub fn canonical_pair(exchange: &str, pair: &str) -> Option<String> {
-        match exchange.to_lowercase().as_str() {
-            "binance" => Self::canonicalize_binance(pair),
-            "coinbase" => Some(Self::canonicalize_coinbase(pair)),
-            _ => None,
-        }
+        let reg = Self::registry().read().expect("registry poisoned");
+        reg.get(&exchange.to_lowercase()).and_then(|f| f(pair))
+    }
+
+    fn canonicalize_coinbase_wrapper(symbol: &str) -> Option<String> {
+        Some(Self::canonicalize_coinbase(symbol))
     }
 
     fn binance_quotes() -> &'static Vec<String> {
