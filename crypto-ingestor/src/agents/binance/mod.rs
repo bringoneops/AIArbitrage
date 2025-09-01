@@ -375,6 +375,27 @@ async fn connection_task(
                                                         last_trade_ids.insert(sym.clone(), id);
                                                     }
                                                 }
+                                                let px = v
+                                                    .get("p")
+                                                    .and_then(|p| p.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let qty = v
+                                                    .get("q")
+                                                    .and_then(|q| q.as_str())
+                                                    .and_then(parse_decimal_str)
+                                                    .unwrap_or_else(|| "?".to_string());
+                                                let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
+                                                let line = serde_json::json!({
+                                                    "agent": "binance",
+                                                    "type": "trade",
+                                                    "s": sym,
+                                                    "t": trade_id,
+                                                    "p": px,
+                                                    "q": qty,
+                                                    "ts": ts
+                                                })
+                                                .to_string();
                                                let px = v
                                                    .get("p")
                                                    .and_then(|p| p.as_str())
