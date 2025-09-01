@@ -1,16 +1,18 @@
-use futures_util::{SinkExt, StreamExt};
 pub mod metadata;
-use std::collections::{HashMap, HashSet};
 pub mod ohlcv;
+
 use std::collections::HashSet;
+
+use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use canonicalizer::CanonicalService;
 
-use super::{shared_symbols, AgentFactory};
 use crate::{
     agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
 };
-use canonicalizer::CanonicalService;
+
+use super::{shared_symbols, AgentFactory};
 
 /// Fetch all tradable USD product IDs from Coinbase.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
