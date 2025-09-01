@@ -181,27 +181,6 @@ impl CanonicalService {
         Ok(quotes)
     }
 
-    async fn fetch_coinbase_quotes() -> Result<Vec<String>, reqwest::Error> {
-        let client = http_client::builder().build()?;
-        let v: serde_json::Value = client
-            .get("https://api.exchange.coinbase.com/products")
-            .send()
-            .await?
-            .json()
-            .await?;
-        let mut set = HashSet::new();
-        if let Some(products) = v.as_array() {
-            for prod in products {
-                if let Some(q) = prod.get("quote_currency").and_then(|q| q.as_str()) {
-                    set.insert(q.to_lowercase());
-                }
-            }
-        }
-        let mut quotes: Vec<String> = set.into_iter().collect();
-        quotes.sort_by_key(|s| std::cmp::Reverse(s.len()));
-        Ok(quotes)
-    }
-
     fn parse_env_quotes(env: &str) -> Vec<String> {
         let mut quotes: Vec<String> = env
             .split(',')

@@ -398,10 +398,6 @@ async fn connection_task(
                                                     Err(e) => {
                                                         tracing::error!(error=%e, "failed to serialize l2 diff");
                                                     }
-                                                let line = evt.to_json_line();
-                                                if tx.send(line).await.is_err() {
-                                                    counter!("canonicalizer_dropped_messages_total", 1);
-                                                    break;
                                                 }
                                             }
                                             _ => {}
