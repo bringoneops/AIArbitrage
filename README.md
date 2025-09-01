@@ -96,3 +96,13 @@ When either `binance:all` or `coinbase:all` agents are used, both exchanges
 subscribe only to USD-quoted pairs common to both platforms so their symbol
 sets align.
 
+
+## Bar aggregation
+
+Aggregate incoming trades into OHLCV bars by providing the `--bars` flag with an interval in seconds. Results are emitted as JSON `Bar` records. By default bars are written to `STDOUT`, but a file path may be supplied via `--output`.
+
+```bash
+cargo run --release -- --bars 60 binance:btcusdt
+cargo run --release -- --bars 300 --output bars.json binance:btcusdt coinbase:BTC-USD
+```
+

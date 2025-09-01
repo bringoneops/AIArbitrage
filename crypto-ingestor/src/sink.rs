@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use std::sync::Arc;
+use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::sync::Mutex;
 
@@ -33,3 +34,31 @@ impl OutputSink for StdoutSink {
         Ok(())
     }
 }
+
+pub struct FileSink {
+    file: Mutex<tokio::fs::File>,
+}
+
+impl FileSink {
+    pub async fn new(path: &str) -> Result<Self, IngestorError> {
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .await?;
+        Ok(Self {
+            file: Mutex::new(file),
+        })
+    }
+}
+
+#[async_trait]
+impl OutputSink for FileSink {
+    async fn send(&self, line: &str) -> Result<(), IngestorError> {
+        let mut file = self.file.lock().await;
+        file.write_all(line.as_bytes()).await?;
+        file.write_all(b"\n").await?;
+        Ok(())
+    }
+}
+

@@ -15,6 +15,14 @@ pub struct Cli {
     /// Enable trade feeds
     #[arg(long)]
     pub trades: bool,
+    /// Aggregate trades into bars of the given interval in seconds
+    #[arg(long, value_name = "SECS")]
+    pub bars: Option<u64>,
+
+    /// Output destination for bars; defaults to stdout
+    #[arg(long)]
+    pub output: Option<String>,
+
 
     /// Agent specifications (e.g. binance:btcusdt)
     pub specs: Vec<String>,
