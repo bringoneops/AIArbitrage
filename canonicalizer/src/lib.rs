@@ -294,4 +294,45 @@ mod tests {
     fn unknown_exchange_returns_none() {
         assert_eq!(CanonicalService::canonical_pair("kraken", "btcusd"), None);
     }
+
+    #[test]
+    fn parse_env_quotes_handles_empty_and_malformed_input() {
+        // Empty string yields no quotes
+        let quotes = CanonicalService::parse_env_quotes("");
+        assert!(quotes.is_empty());
+
+        // Strings with only commas or whitespace also yield no quotes
+        let quotes = CanonicalService::parse_env_quotes(" , , ");
+        assert!(quotes.is_empty());
+
+        // Malformed entries are filtered out and the remaining quotes are sorted
+        let quotes = CanonicalService::parse_env_quotes("USDT,,USD,");
+        assert_eq!(quotes, vec!["usdt".to_string(), "usd".to_string()]);
+    }
+
+    #[test]
+    fn binance_canonicalize_unknown_or_malformed_symbols() {
+        setup();
+
+        // Unknown quote asset results in None
+        assert_eq!(CanonicalService::canonicalize_binance("BTCFOO"), None);
+
+        // Missing base symbol also results in None
+        assert_eq!(CanonicalService::canonicalize_binance("USDT"), None);
+    }
+
+    #[test]
+    fn coinbase_canonicalize_unknown_or_malformed_symbols() {
+        // Unknown quote with separator remains uppercased
+        assert_eq!(
+            CanonicalService::canonicalize_coinbase("foo-bar"),
+            "FOO-BAR".to_string()
+        );
+
+        // Without a separator and an unknown quote the string is simply uppercased
+        assert_eq!(
+            CanonicalService::canonicalize_coinbase("foobarbaz"),
+            "FOOBARBAZ".to_string()
+        );
+    }
 }
