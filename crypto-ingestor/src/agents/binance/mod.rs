@@ -8,10 +8,10 @@ use crate::{
 };
 
 use super::{shared_symbols, AgentFactory};
-use canonicalizer::CanonicalService;
+use canonicalizer::{CanonicalService, L2Diff, Snapshot};
 
 const MAX_STREAMS_PER_CONN: usize = 1024; // per Binance docs
-const STREAMS_PER_SYMBOL: usize = 1; // trade only
+const STREAMS_PER_SYMBOL: usize = 2; // trade + depth
 
 /// Fetch all tradable symbols from Binance US REST API.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
@@ -258,6 +258,9 @@ async fn connection_task(
                     tracing::error!(error=%e, "failed to send subscription");
                     continue;
                 }
+                if let Err(e) = send_snapshots(&current_symbols, &tx).await {
+                    tracing::error!(error=%e, "failed to fetch snapshots");
+                }
 
                 loop {
                     tokio::select! {
@@ -284,6 +287,9 @@ async fn connection_task(
                                         if let Err(e) = send_subscribe(&mut ws, &to_sub).await {
                                             tracing::error!(error=%e, "failed to update subscription");
                                             break;
+                                        }
+                                        if let Err(e) = send_snapshots(&to_sub, &tx).await {
+                                            tracing::error!(error=%e, "failed to fetch snapshots");
                                         }
                                     }
                                     current_symbols = new_syms;
@@ -348,6 +354,42 @@ async fn connection_task(
                                                     break;
                                                 }
                                             }
+                                            "depthUpdate" => {
+                                                let bids = v
+                                                    .get("b")
+                                                    .and_then(|b| b.as_array())
+                                                    .cloned()
+                                                    .unwrap_or_default()
+                                                    .into_iter()
+                                                    .filter_map(|lvl| {
+                                                        let p = lvl.get(0)?.as_str()?;
+                                                        let q = lvl.get(1)?.as_str()?;
+                                                        let p = parse_decimal_str(p)?;
+                                                        let q = parse_decimal_str(q)?;
+                                                        Some([p, q])
+                                                    })
+                                                    .collect::<Vec<[String; 2]>>();
+                                                let asks = v
+                                                    .get("a")
+                                                    .and_then(|a| a.as_array())
+                                                    .cloned()
+                                                    .unwrap_or_default()
+                                                    .into_iter()
+                                                    .filter_map(|lvl| {
+                                                        let p = lvl.get(0)?.as_str()?;
+                                                        let q = lvl.get(1)?.as_str()?;
+                                                        let p = parse_decimal_str(p)?;
+                                                        let q = parse_decimal_str(q)?;
+                                                        Some([p, q])
+                                                    })
+                                                    .collect::<Vec<[String; 2]>>();
+                                                let ts = v.get("E").and_then(|x| x.as_i64()).unwrap_or_default();
+                                                let evt = L2Diff::new("binance", raw, bids, asks, ts);
+                                                let line = evt.to_json_line();
+                                                if tx.send(line).await.is_err() {
+                                                    break;
+                                                }
+                                            }
                                             _ => {}
                                         }
                                     } else {
@@ -393,7 +435,7 @@ async fn send_subscribe(
 ) -> Result<(), tokio_tungstenite::tungstenite::Error> {
     let params = symbols
         .iter()
-        .map(|s| format!("{}@trade", s))
+        .flat_map(|s| vec![format!("{}@trade", s), format!("{}@depth@100ms", s)])
         .collect::<Vec<_>>();
     let sub_msg = serde_json::json!({
         "method": "SUBSCRIBE",
@@ -412,7 +454,7 @@ async fn send_unsubscribe(
     }
     let params = symbols
         .iter()
-        .map(|s| format!("{}@trade", s))
+        .flat_map(|s| vec![format!("{}@trade", s), format!("{}@depth@100ms", s)])
         .collect::<Vec<_>>();
     let msg = serde_json::json!({
         "method": "UNSUBSCRIBE",
@@ -420,4 +462,84 @@ async fn send_unsubscribe(
         "id": 1,
     });
     ws.send(Message::Text(msg.to_string())).await
+}
+
+async fn send_snapshots(
+    symbols: &[String],
+    tx: &mpsc::Sender<String>,
+) -> Result<(), IngestorError> {
+    for sym in symbols {
+        match fetch_snapshot(sym).await {
+            Ok(snap) => {
+                let line = snap.to_json_line();
+                if tx.send(line).await.is_err() {
+                    break;
+                }
+            }
+            Err(e) => {
+                tracing::error!(error=%e, symbol=%sym, "snapshot fetch failed");
+            }
+        }
+    }
+    Ok(())
+}
+
+async fn fetch_snapshot(symbol: &str) -> Result<Snapshot, IngestorError> {
+    let client = http_client::builder()
+        .build()
+        .map_err(|e| IngestorError::Http {
+            source: e,
+            exchange: "binance",
+            symbol: Some(symbol.to_string()),
+        })?;
+    let url = format!(
+        "https://api.binance.us/api/v3/depth?symbol={}&limit=1000",
+        symbol.to_uppercase()
+    );
+    let resp: serde_json::Value = client
+        .get(url)
+        .send()
+        .await
+        .map_err(|e| IngestorError::Http {
+            source: e,
+            exchange: "binance",
+            symbol: Some(symbol.to_string()),
+        })?
+        .json()
+        .await
+        .map_err(|e| IngestorError::Http {
+            source: e,
+            exchange: "binance",
+            symbol: Some(symbol.to_string()),
+        })?;
+    let bids = resp
+        .get("bids")
+        .and_then(|b| b.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|lvl| {
+            let p = lvl.get(0)?.as_str()?;
+            let q = lvl.get(1)?.as_str()?;
+            let p = parse_decimal_str(p)?;
+            let q = parse_decimal_str(q)?;
+            Some([p, q])
+        })
+        .collect::<Vec<[String; 2]>>();
+    let asks = resp
+        .get("asks")
+        .and_then(|a| a.as_array())
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter_map(|lvl| {
+            let p = lvl.get(0)?.as_str()?;
+            let q = lvl.get(1)?.as_str()?;
+            let p = parse_decimal_str(p)?;
+            let q = parse_decimal_str(q)?;
+            Some([p, q])
+        })
+        .collect::<Vec<[String; 2]>>();
+    let ts = chrono::Utc::now().timestamp_millis();
+    Ok(Snapshot::new("binance", symbol, bids, asks, ts))
 }

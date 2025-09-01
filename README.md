@@ -106,3 +106,24 @@ cargo run --release -- --bars 60 binance:btcusdt
 cargo run --release -- --bars 300 --output bars.json binance:btcusdt coinbase:BTC-USD
 ```
 
+## Order book formats
+
+When connected to order book depth streams, agents emit additional JSON lines:
+
+```json
+{"agent":"binance","type":"l2_diff","s":"BTC-USD","bids":[["30000.00","0.5"]],"asks":[["30010.00","1"]],"ts":1680000000000}
+```
+
+and periodic snapshots of the full book:
+
+```json
+{"agent":"coinbase","type":"snapshot","s":"BTC-USD","bids":[["30000.00","0.5"]],"asks":[["30010.00","1"]],"ts":1680000000000}
+```
+
+Fields:
+
+- `agent` – source exchange
+- `type` – either `l2_diff` or `snapshot`
+- `s` – canonical `BASE-QUOTE` symbol
+- `bids`/`asks` – arrays of `[price, quantity]` strings
+- `ts` – event timestamp in milliseconds since Unix epoch
