@@ -46,12 +46,6 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
         .unwrap_or_default()
         .into_iter()
         .filter(|s| s.get("status").and_then(|st| st.as_str()) == Some("TRADING"))
-        .filter(|s| {
-            s.get("quoteAsset")
-                .and_then(|q| q.as_str())
-                .map(|q| q.eq_ignore_ascii_case("USD") || q.eq_ignore_ascii_case("USDT"))
-                .unwrap_or(false)
-        })
         .filter_map(|s| {
             s.get("symbol")
                 .and_then(|sym| sym.as_str())

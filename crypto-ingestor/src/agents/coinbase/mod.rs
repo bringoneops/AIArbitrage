@@ -10,7 +10,7 @@ use crate::{
 
 use super::{shared_symbols, AgentFactory};
 
-/// Fetch all tradable USD product IDs from Coinbase.
+/// Fetch all tradable product IDs from Coinbase.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
     let client = http_client::builder()
         .build()
@@ -41,7 +41,12 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
         .ok_or_else(|| IngestorError::Other("coinbase unexpected response".into()))?;
     let mut symbols = Vec::new();
     for prod in arr {
-        if prod.get("quote_currency").and_then(|q| q.as_str()) == Some("USD") {
+        let status_ok = prod
+            .get("status")
+            .and_then(|s| s.as_str())
+            .map(|s| s.eq_ignore_ascii_case("online"))
+            .unwrap_or(false);
+        if status_ok {
             if let Some(id) = prod.get("id").and_then(|i| i.as_str()) {
                 symbols.push(id.to_string());
             }
