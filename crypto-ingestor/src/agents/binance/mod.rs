@@ -389,13 +389,6 @@ async fn connection_task(
                                                     .and_then(parse_decimal_str)
                                                     .unwrap_or_else(|| "?".to_string());
                                                 let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
-                                                let skew = clock::current_skew_ms();
-                                                {
-                                                    Some(q) => q,
-                                                    None => {                                                        "?".to_string()
-                                                    }
-                                                };
-                                                  let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
                                                 let line = serde_json::json!({
                                                     "agent": "binance",
                                                     "type": "trade",
@@ -404,7 +397,7 @@ async fn connection_task(
                                                     "p": px,
                                                     "q": qty,
                                                     "ts": ts
-                                                })<<<<<<< codex/remove-binanceagent-futures-fields-and-tasks
+                                                })
                                                 .to_string();
                                                 if tx.send(line).await.is_err() {
                                                     break;
