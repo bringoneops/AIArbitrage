@@ -3,8 +3,11 @@ use serde_json::Value;
 use tabwriter::TabWriter;
 use tokio::io::{self as aio, AsyncBufReadExt, AsyncWriteExt};
 use std::io::{self, Write};
+use std::time::Instant;
 
 use canonicalizer::CanonicalService;
+use metrics::{counter, histogram};
+use metrics_exporter_prometheus::PrometheusBuilder;
 
 #[derive(Deserialize)]
 struct Record {
@@ -16,6 +19,11 @@ struct Record {
 
 #[tokio::main]
 async fn main() -> aio::Result<()> {
+    PrometheusBuilder::new()
+        .with_http_listener(([0, 0, 0, 0], 9001))
+        .install()
+        .expect("failed to install Prometheus recorder");
+
     CanonicalService::init().await;
 
     let json_output = std::env::args().any(|a| a == "--json");
@@ -30,6 +38,7 @@ async fn main() -> aio::Result<()> {
             if line.trim().is_empty() {
                 continue;
             }
+            let start = Instant::now();
             match serde_json::from_str::<Value>(&line) {
                 Ok(mut v) => {
                     if let (Some(exchange), Some(pair)) = (
@@ -43,12 +52,15 @@ async fn main() -> aio::Result<()> {
                     let out = serde_json::to_string(&v).unwrap_or(line);
                     stdout.write_all(out.as_bytes()).await?;
                     stdout.write_all(b"\n").await?;
+                    counter!("canonicalizer_processed_messages_total", 1);
                 }
                 Err(_) => {
                     stdout.write_all(line.as_bytes()).await?;
                     stdout.write_all(b"\n").await?;
+                    counter!("canonicalizer_dropped_messages_total", 1);
                 }
             }
+            histogram!("canonicalizer_processing_latency_seconds", start.elapsed().as_secs_f64());
         }
         stdout.flush().await?;
     } else {
@@ -59,6 +71,7 @@ async fn main() -> aio::Result<()> {
             if line.trim().is_empty() {
                 continue;
             }
+            let start = Instant::now();
             match serde_json::from_str::<Value>(&line) {
                 Ok(mut v) => {
                     if let (Some(exchange), Some(pair)) = (
@@ -78,11 +91,14 @@ async fn main() -> aio::Result<()> {
                     } else {
                         writeln!(tw, "{}", line)?;
                     }
+                    counter!("canonicalizer_processed_messages_total", 1);
                 }
                 Err(_) => {
                     writeln!(tw, "{}", line)?;
+                    counter!("canonicalizer_dropped_messages_total", 1);
                 }
             }
+            histogram!("canonicalizer_processing_latency_seconds", start.elapsed().as_secs_f64());
         }
         tw.flush()?;
     }
