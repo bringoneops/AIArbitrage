@@ -27,6 +27,14 @@ pub struct Cli {
     #[arg(long, value_name = "LEVEL")]
     pub log_level: Option<String>,
 
+    /// Total number of ingestor instances running in parallel
+    #[arg(long, default_value_t = 1)]
+    pub instance_count: u32,
+
+    /// Zero-based index of this ingestor instance
+    #[arg(long, default_value_t = 0)]
+    pub instance_index: u32,
+
     /// Agent specifications (e.g. binance:btcusdt)
     pub specs: Vec<String>,
 }
@@ -192,4 +200,29 @@ impl Settings {
         settings.trades = settings.trades || cli.trades;
         Ok(settings)
     }
+}
+
+/// Partition a list of agent specifications across multiple instances.
+///
+/// Returns only the specs assigned to the given `instance_index` out of
+/// `instance_count` total instances.
+pub fn partition_specs(
+    specs: Vec<String>,
+    instance_count: u32,
+    instance_index: u32,
+) -> Vec<String> {
+    if instance_count == 0 {
+        return Vec::new();
+    }
+    specs
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, spec)| {
+            if (i as u32) % instance_count == instance_index {
+                Some(spec)
+            } else {
+                None
+            }
+        })
+        .collect()
 }
