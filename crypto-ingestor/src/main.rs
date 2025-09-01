@@ -15,19 +15,30 @@ use config::{Cli, Settings};
 use error::IngestorError;
 use sink::{DynSink, FileSink, StdoutSink};
 use std::{sync::Arc, thread};
+use std::sync::Arc;
+use std::thread;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), IngestorError> {
-    // logger
-    let subscriber = FmtSubscriber::builder().with_target(false).finish();
-    let _ = tracing::subscriber::set_global_default(subscriber);
-
     // parse CLI and configuration
     let cli = Cli::parse();
+
+    // logger
+    let filter = if let Some(level) = cli.log_level.as_deref() {
+        EnvFilter::new(level)
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"))
+    };
+    let subscriber = FmtSubscriber::builder()
+        .with_env_filter(filter)
+        .with_target(false)
+        .finish();
+    let _ = tracing::subscriber::set_global_default(subscriber);
+
     let mut specs = cli.specs.clone();
     if specs.is_empty() {
         eprintln!("Usage: ingestor <agent_spec> [<agent_spec> ...]");
@@ -89,6 +100,20 @@ async fn main() -> Result<(), IngestorError> {
         let sink_clone = sink.clone();
         canon_handles.push(tokio::spawn(async move {
             let mut rx = rx;
+    // spawn watchdog pool for canonicalizer processes
+    let worker_count = thread::available_parallelism()
+        .map(|n| n.get())
+        .unwrap_or(1);
+    let mut worker_senders = Vec::new();
+    let mut canon_handles = Vec::new();
+    for _ in 0..worker_count {
+        let (wtx, wrx) = mpsc::channel::<String>(100);
+        worker_senders.push(wtx);
+        let canon_path_clone = canon_path.clone();
+        let sink_clone = sink.clone();
+        let bar_interval = cli.bars;
+        canon_handles.push(tokio::spawn(async move {
+            let mut rx = wrx;
             let mut bar_agg = bar_interval.map(BarAggregator::new);
             loop {
                 let mut cmd = Command::new(&canon_path_clone);
@@ -163,6 +188,26 @@ async fn main() -> Result<(), IngestorError> {
             }
         }));
     }
+
+                let _ = canon_child.kill().await;
+            }
+        }));
+    }
+
+    // dispatcher to partition input across workers (round-robin)
+    let dispatcher = {
+        let mut rx = rx;
+        let worker_senders = worker_senders.clone();
+        tokio::spawn(async move {
+            let mut idx = 0usize;
+            while let Some(line) = rx.recv().await {
+                let tx = &worker_senders[idx % worker_senders.len()];
+                let _ = tx.send(line).await;
+                idx += 1;
+            }
+            // dropping worker_senders closes worker channels
+        })
+    };
     // Initialise the canonical service before any agents are created so that
     // the required quote asset list is available for symbol comparisons.
     CanonicalService::init().await;
@@ -206,10 +251,13 @@ async fn main() -> Result<(), IngestorError> {
             tracing::info!("all agents finished");
         }
     }
-
     drop(txs);
     for handle in canon_handles {
         let _ = handle.await;
+    drop(tx);
+    let _ = dispatcher.await;
+    for h in canon_handles {
+        let _ = h.await;
     }
 
     Ok(())

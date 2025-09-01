@@ -23,6 +23,9 @@ pub struct Cli {
     #[arg(long)]
     pub output: Option<String>,
 
+    /// Log level (error, warn, info, debug, trace)
+    #[arg(long, value_name = "LEVEL")]
+    pub log_level: Option<String>,
 
     /// Agent specifications (e.g. binance:btcusdt)
     pub specs: Vec<String>,
