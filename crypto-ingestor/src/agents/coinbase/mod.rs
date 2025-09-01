@@ -1,8 +1,8 @@
+use canonicalizer::{CanonicalService, L2Diff, Snapshot};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
-use canonicalizer::CanonicalService;
 
 use crate::{
     agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
@@ -318,7 +318,6 @@ async fn connection_task(
                                             },
                                             "l2update" => {
                                                 let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
-                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
                                                 let mut bids = Vec::new();
                                                 let mut asks = Vec::new();
                                                 if let Some(changes) = v.get("changes").and_then(|c| c.as_array()) {
@@ -346,20 +345,12 @@ async fn connection_task(
                                                     .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
                                                     .map(|dt| dt.timestamp_millis())
                                                     .unwrap_or_default();
-                                                let line = serde_json::json!({
-                                                    "agent": "coinbase",
-                                                    "type": "l2_diff",
-                                                    "s": sym,
-                                                    "bids": bids,
-                                                    "asks": asks,
-                                                    "ts": ts
-                                                }).to_string();
-                                                if tx.send(line).await.is_ok() {
-                                                } else { break; }
+                                                let evt = L2Diff::new("coinbase", raw, bids, asks, ts);
+                                                let line = evt.to_json_line();
+                                                if tx.send(line).await.is_err() { break; }
                                             }
                                             "snapshot" => {
                                                 let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
-                                                let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
                                                 let bids = v
                                                     .get("bids")
                                                     .and_then(|b| b.as_array())
@@ -367,11 +358,13 @@ async fn connection_task(
                                                     .unwrap_or_default()
                                                     .into_iter()
                                                     .filter_map(|lvl| {
-                                                        let p = lvl.get(0)?.as_str()?.to_string();
-                                                        let q = lvl.get(1)?.as_str()?.to_string();
+                                                        let p = lvl.get(0)?.as_str()?;
+                                                        let q = lvl.get(1)?.as_str()?;
+                                                        let p = parse_decimal_str(p)?;
+                                                        let q = parse_decimal_str(q)?;
                                                         Some([p, q])
                                                     })
-                                                    .collect::<Vec<[String;2]>>();
+                                                    .collect::<Vec<[String; 2]>>();
                                                 let asks = v
                                                     .get("asks")
                                                     .and_then(|a| a.as_array())
@@ -379,22 +372,17 @@ async fn connection_task(
                                                     .unwrap_or_default()
                                                     .into_iter()
                                                     .filter_map(|lvl| {
-                                                        let p = lvl.get(0)?.as_str()?.to_string();
-                                                        let q = lvl.get(1)?.as_str()?.to_string();
+                                                        let p = lvl.get(0)?.as_str()?;
+                                                        let q = lvl.get(1)?.as_str()?;
+                                                        let p = parse_decimal_str(p)?;
+                                                        let q = parse_decimal_str(q)?;
                                                         Some([p, q])
                                                     })
-                                                    .collect::<Vec<[String;2]>>();
+                                                    .collect::<Vec<[String; 2]>>();
                                                 let ts = chrono::Utc::now().timestamp_millis();
-                                                let line = serde_json::json!({
-                                                    "agent": "coinbase",
-                                                    "type": "snapshot",
-                                                    "s": sym,
-                                                    "bids": bids,
-                                                    "asks": asks,
-                                                    "ts": ts
-                                                }).to_string();
-                                                if tx.send(line).await.is_ok() {
-                                                } else { break; }
+                                                let evt = Snapshot::new("coinbase", raw, bids, asks, ts);
+                                                let line = evt.to_json_line();
+                                                if tx.send(line).await.is_err() { break; }
                                             }
                                             _ => {}
                                         }
@@ -471,7 +459,7 @@ async fn send_subscribe(
     let msg = serde_json::json!({
         "type": "subscribe",
         "product_ids": symbols,
-        "channels": ["matches"],
+        "channels": ["level2", "matches"],
     });
     ws.send(Message::Text(msg.to_string())).await
 }
@@ -486,7 +474,7 @@ async fn send_unsubscribe(
     let msg = serde_json::json!({
         "type": "unsubscribe",
         "product_ids": symbols,
-        "channels": ["matches"],
+        "channels": ["level2", "matches"],
     });
     ws.send(Message::Text(msg.to_string())).await
 }
