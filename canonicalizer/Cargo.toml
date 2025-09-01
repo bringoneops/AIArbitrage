@@ -11,6 +11,8 @@ serde = { version = "1", features = ["derive"] }
 tabwriter = "1"
 tracing = "0.1"
 chrono = { version = "0.4", features = ["serde", "clock"] }
+metrics = "0.21"
+metrics-exporter-prometheus = "0.14"
 
 [lib]
 path = "src/lib.rs"
