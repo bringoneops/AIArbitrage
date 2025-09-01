@@ -14,8 +14,19 @@
 //! (`1`, `true`, `yes`). Disabling certificate verification is strongly
 //! discouraged for production use.
 //!
-//! Additional exchanges can be supported by extending
-//! [`CanonicalService::canonical_pair`].
+//! Additional exchanges can be supported without modifying this crate by
+//! registering custom canonicalizers via
+//! [`CanonicalService::register_exchange`]:
+//!
+//! ```no_run
+//! use canonicalizer::CanonicalService;
+//!
+//! fn normalize_kraken(pair: &str) -> Option<String> {
+//!     Some(pair.to_uppercase())
+//! }
+//!
+//! CanonicalService::register_exchange("kraken", normalize_kraken);
+//! ```
 
 pub mod events;
 mod http_client;
@@ -25,8 +36,9 @@ pub use events::{
     OptionSurfacePoint, Side, Symbol, Trade, TradeMeta,
 };
 
+use std::collections::{HashMap, HashSet};
 use std::collections::HashSet;
-use std::sync::OnceLock;
+use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
 use tracing::warn;
@@ -34,12 +46,25 @@ use tracing::warn;
 pub struct CanonicalService;
 
 /// Cached list of Binance quote assets. Populated at startup via [`init`].
+static BINANCE_QUOTES: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
 static BINANCE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
+/// Cached list of Coinbase quote assets. Populated at startup via [`init`].
+static COINBASE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
+
+/// Registered canonicalizers for each exchange. Populated with default
+/// implementations for supported exchanges and extendable at runtime via
+/// [`register_exchange`].
+static CANONICALIZERS: OnceLock<RwLock<HashMap<String, Canonicalizer>>> = OnceLock::new();
+
+type Canonicalizer = fn(&str) -> Option<String>;
 
 impl CanonicalService {
-    /// Initialise any resources required by the service. Currently this loads
-    /// the list of Binance quote assets from the public `exchangeInfo` endpoint
-    /// (unless provided via the `BINANCE_QUOTES` environment variable).
+    /// Initialise any resources required by the service. This loads the list of
+    /// quote assets for supported exchanges from their public endpoints (unless
+    /// provided via environment variables).
+    ///
+    /// If `BINANCE_QUOTES_REFRESH_INTERVAL_SECS` is set, a background task will
+    /// periodically refresh the cached quotes.
     ///
     /// Network errors are logged and fall back to a small built-in list.
     pub async fn init() {
@@ -47,39 +72,133 @@ impl CanonicalService {
             return;
         }
 
+        let quotes = Self::load_binance_quotes().await;
+        let _ = BINANCE_QUOTES.set(RwLock::new(quotes));
+
+        Self::maybe_spawn_binance_refresher();
+    }
+
+    async fn load_binance_quotes() -> Vec<String> {
         if let Ok(env) = std::env::var("BINANCE_QUOTES") {
-            let quotes = Self::parse_env_quotes(&env);
-            let _ = BINANCE_QUOTES.set(quotes);
-            return;
+            return Self::parse_env_quotes(&env);
         }
 
         match Self::fetch_binance_quotes().await {
-            Ok(quotes) if !quotes.is_empty() => {
-                let _ = BINANCE_QUOTES.set(quotes);
-            }
-            Ok(_) => {
-                let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
-            }
+            Ok(quotes) if !quotes.is_empty() => quotes,
+            Ok(_) => Self::default_binance_quotes(),
             Err(e) => {
                 warn!("failed to fetch Binance quotes: {}", e);
-                let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
+                Self::default_binance_quotes()
             }
         }
+    }
+
+    /// Re-fetch the Binance quote assets and replace the cached set.
+    pub async fn refresh_binance_quotes() {
+        let quotes = Self::load_binance_quotes().await;
+        let lock = Self::binance_quotes();
+        if let Ok(mut guard) = lock.write() {
+            *guard = quotes;
+        }
+    }
+
+    /// Spawn a background task to refresh Binance quotes if configured via
+    /// the `BINANCE_QUOTES_REFRESH_INTERVAL_SECS` environment variable.
+    pub fn maybe_spawn_binance_refresher() {
+        if let Ok(val) = std::env::var("BINANCE_QUOTES_REFRESH_INTERVAL_SECS") {
+            if let Ok(secs) = val.parse::<u64>() {
+                tokio::spawn(async move {
+                    let mut int = tokio::time::interval(std::time::Duration::from_secs(secs));
+                    loop {
+                        int.tick().await;
+                        CanonicalService::refresh_binance_quotes().await;
+                    }
+                });
+    /// Network errors are logged and fall back to small built-in lists.
+    pub async fn init() {
+        if BINANCE_QUOTES.get().is_none() {
+            if let Ok(env) = std::env::var("BINANCE_QUOTES") {
+                let quotes = Self::parse_env_quotes(&env);
+                let _ = BINANCE_QUOTES.set(quotes);
+            } else {
+                match Self::fetch_binance_quotes().await {
+                    Ok(quotes) if !quotes.is_empty() => {
+                        let _ = BINANCE_QUOTES.set(quotes);
+                    }
+                    Ok(_) => {
+                        let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
+                    }
+                    Err(e) => {
+                        warn!("failed to fetch Binance quotes: {}", e);
+                        let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
+                    }
+                }
+            }
+        }
+
+        if COINBASE_QUOTES.get().is_none() {
+            if let Ok(env) = std::env::var("COINBASE_QUOTES") {
+                let quotes = Self::parse_env_quotes(&env);
+                let _ = COINBASE_QUOTES.set(quotes);
+            } else {
+                match Self::fetch_coinbase_quotes().await {
+                    Ok(quotes) if !quotes.is_empty() => {
+                        let _ = COINBASE_QUOTES.set(quotes);
+                    }
+                    Ok(_) => {
+                        let _ = COINBASE_QUOTES.set(Self::default_coinbase_quotes());
+                    }
+                    Err(e) => {
+                        warn!("failed to fetch Coinbase quotes: {}", e);
+                        let _ = COINBASE_QUOTES.set(Self::default_coinbase_quotes());
+                    }
+                }
+            }
+        }
+    }
+
+    fn registry() -> &'static RwLock<HashMap<String, Canonicalizer>> {
+        CANONICALIZERS.get_or_init(|| {
+            let mut map: HashMap<String, Canonicalizer> = HashMap::new();
+            map.insert(
+                "binance".to_string(),
+                Self::canonicalize_binance as Canonicalizer,
+            );
+            map.insert(
+                "coinbase".to_string(),
+                Self::canonicalize_coinbase_wrapper as Canonicalizer,
+            );
+            RwLock::new(map)
+        })
+    }
+
+    /// Register a canonicalizer for an additional exchange. This allows third
+    /// parties to plug in normalisation logic without modifying the core
+    /// library.
+    pub fn register_exchange(name: &str, func: Canonicalizer) {
+        let mut reg = Self::registry().write().expect("registry poisoned");
+        reg.insert(name.to_lowercase(), func);
     }
 
     /// Convert `pair` as used by `exchange` into the canonical `BASE-QUOTE`
     /// representation. Returns `None` if the exchange is unknown or the pair
-    /// cannot be parsed.
+    /// cannot be parsed. New exchanges can register their own canonicalizers
+    /// via [`register_exchange`].
     pub fn canonical_pair(exchange: &str, pair: &str) -> Option<String> {
-        match exchange.to_lowercase().as_str() {
-            "binance" => Self::canonicalize_binance(pair),
-            "coinbase" => Some(Self::canonicalize_coinbase(pair)),
-            _ => None,
-        }
+        let reg = Self::registry().read().expect("registry poisoned");
+        reg.get(&exchange.to_lowercase()).and_then(|f| f(pair))
     }
 
-    fn binance_quotes() -> &'static Vec<String> {
-        BINANCE_QUOTES.get_or_init(Self::default_binance_quotes)
+    fn canonicalize_coinbase_wrapper(symbol: &str) -> Option<String> {
+        Some(Self::canonicalize_coinbase(symbol))
+    }
+
+    fn binance_quotes() -> &'static RwLock<Vec<String>> {
+        BINANCE_QUOTES.get_or_init(|| RwLock::new(Self::default_binance_quotes()))
+    }
+
+    fn coinbase_quotes() -> &'static Vec<String> {
+        COINBASE_QUOTES.get_or_init(Self::default_coinbase_quotes)
     }
 
     async fn fetch_binance_quotes() -> Result<Vec<String>, reqwest::Error> {
@@ -94,6 +213,27 @@ impl CanonicalService {
         if let Some(symbols) = v.get("symbols").and_then(|s| s.as_array()) {
             for sym in symbols {
                 if let Some(q) = sym.get("quoteAsset").and_then(|q| q.as_str()) {
+                    set.insert(q.to_lowercase());
+                }
+            }
+        }
+        let mut quotes: Vec<String> = set.into_iter().collect();
+        quotes.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        Ok(quotes)
+    }
+
+    async fn fetch_coinbase_quotes() -> Result<Vec<String>, reqwest::Error> {
+        let client = http_client::builder().build()?;
+        let v: serde_json::Value = client
+            .get("https://api.exchange.coinbase.com/products")
+            .send()
+            .await?
+            .json()
+            .await?;
+        let mut set = HashSet::new();
+        if let Some(products) = v.as_array() {
+            for prod in products {
+                if let Some(q) = prod.get("quote_currency").and_then(|q| q.as_str()) {
                     set.insert(q.to_lowercase());
                 }
             }
@@ -120,17 +260,27 @@ impl CanonicalService {
         quotes
     }
 
+    fn default_coinbase_quotes() -> Vec<String> {
+        const DEFAULT: [&str; 8] = ["usdt", "usdc", "usd", "btc", "eth", "eur", "gbp", "dai"];
+        let mut quotes: Vec<String> = DEFAULT.iter().map(|q| q.to_string()).collect();
+        quotes.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        quotes
+    }
+
     fn canonicalize_binance(symbol: &str) -> Option<String> {
         let lower = symbol.to_lowercase();
-        for q in Self::binance_quotes() {
+        let quotes = Self::binance_quotes().read().ok()?;
+        for q in quotes.iter() {
             if lower.ends_with(q) {
                 let base = &lower[..lower.len() - q.len()];
                 if base.is_empty() {
+                    warn!("binance: failed to parse base asset for '{symbol}'");
                     return None;
                 }
                 return Some(format!("{}-{}", base.to_uppercase(), q.to_uppercase()));
             }
         }
+        warn!("binance: failed to detect quote asset for '{symbol}'");
         None
     }
 
@@ -142,8 +292,7 @@ impl CanonicalService {
         }
 
         // Attempt to detect a known quote asset when no separator is present.
-        const QUOTES: [&str; 6] = ["usdt", "usdc", "usd", "btc", "eth", "eur"];
-        for q in QUOTES {
+        for q in Self::coinbase_quotes() {
             if lower.ends_with(q) {
                 let base = &lower[..lower.len() - q.len()];
                 if !base.is_empty() {
@@ -151,7 +300,7 @@ impl CanonicalService {
                 }
             }
         }
-
+        warn!("coinbase: failed to canonicalize '{symbol}'");
         lower.to_uppercase()
     }
 
@@ -159,7 +308,17 @@ impl CanonicalService {
     pub fn set_binance_quotes(quotes: Vec<&str>) {
         let mut qs: Vec<String> = quotes.into_iter().map(|s| s.to_lowercase()).collect();
         qs.sort_by(|a, b| b.len().cmp(&a.len()));
-        let _ = BINANCE_QUOTES.set(qs);
+        let lock = BINANCE_QUOTES.get_or_init(|| RwLock::new(Vec::new()));
+        if let Ok(mut guard) = lock.write() {
+            *guard = qs;
+        }
+    }
+
+    #[cfg(test)]
+    pub fn set_coinbase_quotes(quotes: Vec<&str>) {
+        let mut qs: Vec<String> = quotes.into_iter().map(|s| s.to_lowercase()).collect();
+        qs.sort_by(|a, b| b.len().cmp(&a.len()));
+        let _ = COINBASE_QUOTES.set(qs);
     }
 }
 
@@ -197,8 +356,8 @@ impl L2Diff {
         }
     }
 
-    pub fn to_json_line(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
+    pub fn to_json_line(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 }
 
@@ -236,8 +395,8 @@ impl Snapshot {
         }
     }
 
-    pub fn to_json_line(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
+    pub fn to_json_line(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 }
 
@@ -293,5 +452,46 @@ mod tests {
     #[test]
     fn unknown_exchange_returns_none() {
         assert_eq!(CanonicalService::canonical_pair("kraken", "btcusd"), None);
+    }
+
+    #[test]
+    fn parse_env_quotes_handles_empty_and_malformed_input() {
+        // Empty string yields no quotes
+        let quotes = CanonicalService::parse_env_quotes("");
+        assert!(quotes.is_empty());
+
+        // Strings with only commas or whitespace also yield no quotes
+        let quotes = CanonicalService::parse_env_quotes(" , , ");
+        assert!(quotes.is_empty());
+
+        // Malformed entries are filtered out and the remaining quotes are sorted
+        let quotes = CanonicalService::parse_env_quotes("USDT,,USD,");
+        assert_eq!(quotes, vec!["usdt".to_string(), "usd".to_string()]);
+    }
+
+    #[test]
+    fn binance_canonicalize_unknown_or_malformed_symbols() {
+        setup();
+
+        // Unknown quote asset results in None
+        assert_eq!(CanonicalService::canonicalize_binance("BTCFOO"), None);
+
+        // Missing base symbol also results in None
+        assert_eq!(CanonicalService::canonicalize_binance("USDT"), None);
+    }
+
+    #[test]
+    fn coinbase_canonicalize_unknown_or_malformed_symbols() {
+        // Unknown quote with separator remains uppercased
+        assert_eq!(
+            CanonicalService::canonicalize_coinbase("foo-bar"),
+            "FOO-BAR".to_string()
+        );
+
+        // Without a separator and an unknown quote the string is simply uppercased
+        assert_eq!(
+            CanonicalService::canonicalize_coinbase("foobarbaz"),
+            "FOOBARBAZ".to_string()
+        );
     }
 }

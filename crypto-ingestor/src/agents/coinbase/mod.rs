@@ -3,6 +3,7 @@ use futures_util::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use metrics::counter;
 
 use crate::{
     agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
@@ -10,7 +11,7 @@ use crate::{
 
 use super::{shared_symbols, AgentFactory};
 
-/// Fetch all tradable USD product IDs from Coinbase.
+/// Fetch all tradable product IDs from Coinbase.
 pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
     let client = http_client::builder()
         .build()
@@ -41,7 +42,12 @@ pub async fn fetch_all_symbols() -> Result<Vec<String>, IngestorError> {
         .ok_or_else(|| IngestorError::Other("coinbase unexpected response".into()))?;
     let mut symbols = Vec::new();
     for prod in arr {
-        if prod.get("quote_currency").and_then(|q| q.as_str()) == Some("USD") {
+        let status_ok = prod
+            .get("status")
+            .and_then(|s| s.as_str())
+            .map(|s| s.eq_ignore_ascii_case("online"))
+            .unwrap_or(false);
+        if status_ok {
             if let Some(id) = prod.get("id").and_then(|i| i.as_str()) {
                 symbols.push(id.to_string());
             }
@@ -260,6 +266,7 @@ async fn connection_task(
                                                     "ts": ts
                                                 }).to_string();
                                                 if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
                                                     let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
                                                     let sym = CanonicalService::canonical_pair("coinbase", raw)
                                                         .unwrap_or_else(|| raw.to_string());
@@ -312,6 +319,7 @@ async fn connection_task(
                                                     })
                                                     .to_string();
                                                     if tx.send(line).await.is_err() {
+                                                        counter!("canonicalizer_dropped_messages_total", 1);
                                                         break;
                                                     }
                                                 }
@@ -346,8 +354,18 @@ async fn connection_task(
                                                     .map(|dt| dt.timestamp_millis())
                                                     .unwrap_or_default();
                                                 let evt = L2Diff::new("coinbase", raw, bids, asks, ts);
+                                                match evt.to_json_line() {
+                                                    Ok(line) => {
+                                                        if tx.send(line).await.is_err() { break; }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!(error=%e, "failed to serialize l2 diff");
+                                                    }
                                                 let line = evt.to_json_line();
-                                                if tx.send(line).await.is_err() { break; }
+                                                if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
+                                                    break;
+                                                }
                                             }
                                             "snapshot" => {
                                                 let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
@@ -381,8 +399,18 @@ async fn connection_task(
                                                     .collect::<Vec<[String; 2]>>();
                                                 let ts = chrono::Utc::now().timestamp_millis();
                                                 let evt = Snapshot::new("coinbase", raw, bids, asks, ts);
+                                                match evt.to_json_line() {
+                                                    Ok(line) => {
+                                                        if tx.send(line).await.is_err() { break; }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!(error=%e, "failed to serialize snapshot");
+                                                    }
                                                 let line = evt.to_json_line();
-                                                if tx.send(line).await.is_err() { break; }
+                                                if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
+                                                    break;
+                                                }
                                             }
                                             _ => {}
                                         }
@@ -435,6 +463,14 @@ impl AgentFactory for CoinbaseFactory {
         let symbols = if spec.is_empty() {
             vec!["BTC-USD".to_string()]
         } else if spec.eq_ignore_ascii_case("all") {
+            match fetch_all_symbols().await {
+                Ok(v) => v,
+                Err(e) => {
+                    tracing::error!(error=%e, "failed to fetch coinbase symbols");
+                    return None;
+                }
+            }
+        } else if spec.eq_ignore_ascii_case("shared") {
             match shared_symbols().await {
                 Ok((_, c)) => c,
                 Err(e) => {

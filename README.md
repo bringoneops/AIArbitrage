@@ -37,6 +37,16 @@ with the `--trades` flag:
 cargo run --release -- --trades binance:btcusdt
 ```
 
+## Logging
+
+Control verbosity with the `--log-level` flag or the `RUST_LOG` environment variable. The default level is `warn`.
+
+```bash
+ingestor --log-level warn binance:btcusdt
+ingestor --log-level info binance:btcusdt
+RUST_LOG=debug ingestor binance:btcusdt
+```
+
 ## Canonicalizer
 
 The `canonicalizer` crate provides both the `CanonicalService` library and a
@@ -46,6 +56,18 @@ canonical `BASE-QUOTE` form using `canonicalizer::CanonicalService`, and by
 default prints the `agent`, `s`, `p`, and `q` fields in aligned tab-separated
 columns for easy reading. Use the `--json` flag to emit the modified JSON
 records, preserving the previous behaviour.
+
+Custom exchanges can be supported by registering a canonicalizer at runtime:
+
+```rust
+use canonicalizer::CanonicalService;
+
+fn normalize_kraken(pair: &str) -> Option<String> {
+    Some(pair.to_uppercase())
+}
+
+CanonicalService::register_exchange("kraken", normalize_kraken);
+```
 
 The ingestor spawns this canonicalizer automatically so all output is already
 canonicalized:
@@ -103,10 +125,13 @@ Fields:
 - `p` – price as a string
 - `q` – quantity as a string
 - `ts` – trade timestamp in milliseconds since Unix epoch
-
 When using `binance:shared` or `coinbase:shared` (`*:shared`), both exchanges
 subscribe only to USD-quoted pairs common to both platforms so their symbol
 sets align.
+When either `binance:shared` or `coinbase:shared` agents are used, both
+exchanges subscribe only to USD-quoted pairs common to both platforms so their
+symbol sets align. Use `binance:all` or `coinbase:all` to stream every tradable
+symbol on the respective exchange.
 
 
 ## Bar aggregation
