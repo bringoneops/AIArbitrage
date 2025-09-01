@@ -3,6 +3,7 @@ use futures_util::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use metrics::counter;
 
 use crate::{
     agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
@@ -260,6 +261,7 @@ async fn connection_task(
                                                     "ts": ts
                                                 }).to_string();
                                                 if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
                                                     let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
                                                     let sym = CanonicalService::canonical_pair("coinbase", raw)
                                                         .unwrap_or_else(|| raw.to_string());
@@ -312,6 +314,7 @@ async fn connection_task(
                                                     })
                                                     .to_string();
                                                     if tx.send(line).await.is_err() {
+                                                        counter!("canonicalizer_dropped_messages_total", 1);
                                                         break;
                                                     }
                                                 }
@@ -353,6 +356,10 @@ async fn connection_task(
                                                     Err(e) => {
                                                         tracing::error!(error=%e, "failed to serialize l2 diff");
                                                     }
+                                                let line = evt.to_json_line();
+                                                if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
+                                                    break;
                                                 }
                                             }
                                             "snapshot" => {
@@ -394,6 +401,10 @@ async fn connection_task(
                                                     Err(e) => {
                                                         tracing::error!(error=%e, "failed to serialize snapshot");
                                                     }
+                                                let line = evt.to_json_line();
+                                                if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
+                                                    break;
                                                 }
                                             }
                                             _ => {}

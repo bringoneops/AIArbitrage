@@ -2,6 +2,7 @@ use futures_util::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use metrics::counter;
 
 use crate::{
     agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
@@ -351,6 +352,7 @@ async fn connection_task(
                                                 })
                                                 .to_string();
                                                 if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
                                                     break;
                                                 }
                                             }
@@ -394,6 +396,10 @@ async fn connection_task(
                                                     Err(e) => {
                                                         tracing::error!(error=%e, "failed to serialize l2 diff");
                                                     }
+                                                let line = evt.to_json_line();
+                                                if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
+                                                    break;
                                                 }
                                             }
                                             _ => {}
@@ -481,6 +487,7 @@ async fn send_snapshots(
                     .to_json_line()
                     .map_err(|e| IngestorError::Other(format!("failed to serialize snapshot: {e}")))?;
                 if tx.send(line).await.is_err() {
+                    counter!("canonicalizer_dropped_messages_total", 1);
                     break;
                 }
             }
