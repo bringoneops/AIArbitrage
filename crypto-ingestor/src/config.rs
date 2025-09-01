@@ -22,6 +22,7 @@ pub struct Cli {
 
 /// Application configuration loaded from file and environment
 #[derive(Debug, Clone, Deserialize)]
+#[allow(dead_code)]
 pub struct Settings {
     pub binance_ws_url: String,
     pub binance_refresh_interval_mins: u64,
@@ -75,10 +76,6 @@ pub struct Settings {
     pub news_headlines: bool,
     #[serde(default)]
     pub telemetry: bool,
-}
-
-fn default_sink() -> String {
-    "stdout".into()
 }
 
 fn default_binance_options_poll_interval_secs() -> u64 {
