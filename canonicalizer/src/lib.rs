@@ -197,8 +197,8 @@ impl L2Diff {
         }
     }
 
-    pub fn to_json_line(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
+    pub fn to_json_line(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 }
 
@@ -236,8 +236,8 @@ impl Snapshot {
         }
     }
 
-    pub fn to_json_line(&self) -> String {
-        serde_json::to_string(self).unwrap_or_default()
+    pub fn to_json_line(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string(self)
     }
 }
 

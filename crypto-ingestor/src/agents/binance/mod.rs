@@ -385,9 +385,15 @@ async fn connection_task(
                                                     .collect::<Vec<[String; 2]>>();
                                                 let ts = v.get("E").and_then(|x| x.as_i64()).unwrap_or_default();
                                                 let evt = L2Diff::new("binance", raw, bids, asks, ts);
-                                                let line = evt.to_json_line();
-                                                if tx.send(line).await.is_err() {
-                                                    break;
+                                                match evt.to_json_line() {
+                                                    Ok(line) => {
+                                                        if tx.send(line).await.is_err() {
+                                                            break;
+                                                        }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!(error=%e, "failed to serialize l2 diff");
+                                                    }
                                                 }
                                             }
                                             _ => {}
@@ -471,7 +477,9 @@ async fn send_snapshots(
     for sym in symbols {
         match fetch_snapshot(sym).await {
             Ok(snap) => {
-                let line = snap.to_json_line();
+                let line = snap
+                    .to_json_line()
+                    .map_err(|e| IngestorError::Other(format!("failed to serialize snapshot: {e}")))?;
                 if tx.send(line).await.is_err() {
                     break;
                 }
