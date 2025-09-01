@@ -16,6 +16,18 @@ This repository is organised as a Cargo workspace containing several crates:
 - `binance` – streams trade data for selected symbols via WebSocket.
 - `coinbase` – streams trade data for selected pairs via WebSocket.
 
+## Agent specs
+
+Agents are specified as `<exchange>:<market>`. For example, `binance:btcusdt`
+or `coinbase:BTC-USD` will stream trades for a single market. Use
+`binance:all` or `coinbase:all` (`*:all`) to subscribe to every market the
+exchange offers. **Warning:** subscribing to all markets generates a very
+large volume of data and should only be used if your system can handle the
+load.
+
+To limit streaming to USD-quoted pairs common to both Binance and Coinbase, use
+`binance:shared` or `coinbase:shared` (`*:shared`).
+
 ## Feeds
 
 The ingestor currently supports streaming raw trade data. Enable the trade feed
@@ -92,7 +104,7 @@ Fields:
 - `q` – quantity as a string
 - `ts` – trade timestamp in milliseconds since Unix epoch
 
-When either `binance:all` or `coinbase:all` agents are used, both exchanges
+When using `binance:shared` or `coinbase:shared` (`*:shared`), both exchanges
 subscribe only to USD-quoted pairs common to both platforms so their symbol
 sets align.
 
