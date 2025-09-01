@@ -4,6 +4,8 @@ pub mod ohlcv;
 use std::collections::HashSet;
 
 use futures_util::{SinkExt, StreamExt};
+use futures_util::{SinkExt, StreamExt};
+use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use canonicalizer::CanonicalService;
