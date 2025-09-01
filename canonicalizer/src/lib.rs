@@ -230,11 +230,13 @@ impl CanonicalService {
             if lower.ends_with(q) {
                 let base = &lower[..lower.len() - q.len()];
                 if base.is_empty() {
+                    warn!("binance: failed to parse base asset for '{symbol}'");
                     return None;
                 }
                 return Some(format!("{}-{}", base.to_uppercase(), q.to_uppercase()));
             }
         }
+        warn!("binance: failed to detect quote asset for '{symbol}'");
         None
     }
 
@@ -254,7 +256,7 @@ impl CanonicalService {
                 }
             }
         }
-
+        warn!("coinbase: failed to canonicalize '{symbol}'");
         lower.to_uppercase()
     }
 
