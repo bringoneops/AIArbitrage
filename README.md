@@ -96,6 +96,16 @@ When either `binance:all` or `coinbase:all` agents are used, both exchanges
 subscribe only to USD-quoted pairs common to both platforms so their symbol
 sets align.
 
+
+## Bar aggregation
+
+Aggregate incoming trades into OHLCV bars by providing the `--bars` flag with an interval in seconds. Results are emitted as JSON `Bar` records. By default bars are written to `STDOUT`, but a file path may be supplied via `--output`.
+
+```bash
+cargo run --release -- --bars 60 binance:btcusdt
+cargo run --release -- --bars 300 --output bars.json binance:btcusdt coinbase:BTC-USD
+```
+
 ## Order book formats
 
 When connected to order book depth streams, agents emit additional JSON lines:
@@ -117,4 +127,3 @@ Fields:
 - `s` – canonical `BASE-QUOTE` symbol
 - `bids`/`asks` – arrays of `[price, quantity]` strings
 - `ts` – event timestamp in milliseconds since Unix epoch
-

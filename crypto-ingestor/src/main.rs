@@ -4,6 +4,7 @@ mod config;
 mod error;
 mod http_client;
 mod parse;
+mod bar;
 mod sink;
 
 use agents::{available_agents, make_agent};
@@ -11,7 +12,8 @@ use canonicalizer::CanonicalService;
 use clap::Parser;
 use config::{Cli, Settings};
 use error::IngestorError;
-use sink::{DynSink, StdoutSink};
+use sink::{DynSink, FileSink, StdoutSink};
+use bar::BarAggregator;
 use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
@@ -41,7 +43,11 @@ async fn main() -> Result<(), IngestorError> {
     let settings = Settings::load(&cli)?;
 
     // initialise output sink
-    let sink: DynSink = Arc::new(StdoutSink::new());
+    let sink: DynSink = if let Some(path) = &cli.output {
+        Arc::new(FileSink::new(path).await?)
+    } else {
+        Arc::new(StdoutSink::new())
+    };
 
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
 
@@ -69,10 +75,16 @@ async fn main() -> Result<(), IngestorError> {
     // spawn watchdog for canonicalizer process
     let canon_path_clone = canon_path.clone();
     let sink_clone = sink.clone();
+    let bar_interval = cli.bars;
     let canon_watchdog = tokio::spawn(async move {
         let mut rx = rx;
+        let mut bar_agg = bar_interval.map(BarAggregator::new);
         loop {
-            let mut canon_child = match Command::new(&canon_path_clone)
+            let mut cmd = Command::new(&canon_path_clone);
+            if bar_agg.is_some() {
+                cmd.arg("--json");
+            }
+            let mut canon_child = match cmd
                 .stdin(std::process::Stdio::piped())
                 .stdout(std::process::Stdio::piped())
                 .spawn()
@@ -94,12 +106,8 @@ async fn main() -> Result<(), IngestorError> {
                     line = rx.recv() => {
                         match line {
                             Some(line) => {
-                                if canon_stdin.write_all(line.as_bytes()).await.is_err() {
-                                    break;
-                                }
-                                if canon_stdin.write_all(b"\n").await.is_err() {
-                                    break;
-                                }
+                                if canon_stdin.write_all(line.as_bytes()).await.is_err() { break; }
+                                if canon_stdin.write_all(b"\n").await.is_err() { break; }
                             }
                             None => {
                                 let _ = canon_child.kill().await;
@@ -110,7 +118,14 @@ async fn main() -> Result<(), IngestorError> {
                     res = reader.next_line() => {
                         match res {
                             Ok(Some(line)) => {
-                                if let Err(e) = sink.send(&line).await {
+                                if let Some(agg) = bar_agg.as_mut() {
+                                    if let Some(bar) = agg.process_line(&line) {
+                                        let out = serde_json::to_string(&bar).unwrap_or_default();
+                                        if let Err(e) = sink.send(&out).await {
+                                            tracing::error!(error=%e, "sink error");
+                                        }
+                                    }
+                                } else if let Err(e) = sink.send(&line).await {
                                     tracing::error!(error=%e, "sink error");
                                 }
                             }
@@ -124,11 +139,19 @@ async fn main() -> Result<(), IngestorError> {
                 }
             }
 
+            if let Some(agg) = bar_agg.as_mut() {
+                for bar in agg.drain() {
+                    let out = serde_json::to_string(&bar).unwrap_or_default();
+                    if let Err(e) = sink.send(&out).await {
+                        tracing::error!(error=%e, "sink error");
+                    }
+                }
+            }
+
             let _ = canon_child.kill().await;
         }
     });
-
-    // Initialise the canonical service before any agents are created so that
+// Initialise the canonical service before any agents are created so that
     // the required quote asset list is available for symbol comparisons.
     CanonicalService::init().await;
 
