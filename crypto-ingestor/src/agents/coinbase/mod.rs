@@ -1,6 +1,6 @@
 use canonicalizer::{CanonicalService, L2Diff, Snapshot};
 use futures_util::{SinkExt, StreamExt};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
 use metrics::counter;
@@ -170,7 +170,6 @@ async fn connection_task(
     max_reconnect_delay_secs: u64,
 ) {
     let mut attempt: u32 = 0;
-    let mut last_trade_ids: HashMap<String, i64> = HashMap::new();
 
     loop {
         if *shutdown.borrow() {
@@ -256,72 +255,18 @@ async fn connection_task(
                                                     .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
                                                     .map(|dt| dt.timestamp_millis())
                                                     .unwrap_or_default();
-                                                let line = serde_json::json!({
-                                                    "agent": "coinbase",
-                                                    "type": "trade",
-                                                    "s": sym,
-                                                    "t": trade_id,
-                                                    "p": price,
-                                                    "q": size,
-                                                    "ts": ts
-                                                }).to_string();
+                                                  let line = serde_json::json!({
+                                                      "agent": "coinbase",
+                                                      "type": "trade",
+                                                      "s": sym,
+                                                      "t": trade_id,
+                                                      "p": price,
+                                                      "q": size,
+                                                      "ts": ts
+                                                  }).to_string();
                                                 if tx.send(line).await.is_err() {
                                                     counter!("canonicalizer_dropped_messages_total", 1);
-                                                    let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
-                                                    let sym = CanonicalService::canonical_pair("coinbase", raw)
-                                                        .unwrap_or_else(|| raw.to_string());
-                                                    // Missing or non-positive trade IDs are represented as JSON null.
-                                                    let trade_id = v
-                                                        .get("trade_id")
-                                                        .and_then(|id| id.as_i64())
-                                                        .filter(|id| *id > 0);
-                                                    if let Some(id) = trade_id {
-                                                        if let Some(last) = last_trade_ids.get_mut(&sym) {
-                                                            *last = id;
-                                                        } else {
-                                                            last_trade_ids.insert(sym.clone(), id);
-                                                        }
-                                                    }
-                                                    let price = match v
-                                                        .get("price")
-                                                        .and_then(|p| p.as_str())
-                                                        .and_then(parse_decimal_str)
-                                                    {
-                                                        Some(p) => p,
-                                                        None => {
-                                                            "?".to_string()
-                                                        }
-                                                    };
-                                                    let size = match v
-                                                        .get("size")
-                                                        .and_then(|q| q.as_str())
-                                                        .and_then(parse_decimal_str)
-                                                    {
-                                                        Some(q) => q,
-                                                        None => {
-                                                            "?".to_string()
-                                                        }
-                                                    };
-                                                    let ts = v
-                                                        .get("time")
-                                                        .and_then(|t| t.as_str())
-                                                        .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                                                        .map(|dt| dt.timestamp_millis())
-                                                        .unwrap_or_default();
-                                                    let line = serde_json::json!({
-                                                        "agent": "coinbase",
-                                                        "type": "trade",
-                                                        "s": sym,
-                                                        "t": trade_id,
-                                                        "p": price,
-                                                        "q": size,
-                                                        "ts": ts
-                                                    })
-                                                    .to_string();
-                                                    if tx.send(line).await.is_err() {
-                                                        counter!("canonicalizer_dropped_messages_total", 1);
-                                                        break;
-                                                    }
+                                                    break;
                                                 }
                                             },
                                             "l2update" => {
@@ -361,10 +306,6 @@ async fn connection_task(
                                                     Err(e) => {
                                                         tracing::error!(error=%e, "failed to serialize l2 diff");
                                                     }
-                                                let line = evt.to_json_line();
-                                                if tx.send(line).await.is_err() {
-                                                    counter!("canonicalizer_dropped_messages_total", 1);
-                                                    break;
                                                 }
                                             }
                                             "snapshot" => {
@@ -406,10 +347,6 @@ async fn connection_task(
                                                     Err(e) => {
                                                         tracing::error!(error=%e, "failed to serialize snapshot");
                                                     }
-                                                let line = evt.to_json_line();
-                                                if tx.send(line).await.is_err() {
-                                                    counter!("canonicalizer_dropped_messages_total", 1);
-                                                    break;
                                                 }
                                             }
                                             _ => {}
