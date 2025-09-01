@@ -20,6 +20,9 @@ use std::thread;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
+use tracing_subscriber::FmtSubscriber;
+use metrics::{counter, gauge};
+use metrics_exporter_prometheus::PrometheusBuilder;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[tokio::main(flavor = "multi_thread")]
@@ -39,6 +42,13 @@ async fn main() -> Result<(), IngestorError> {
         .finish();
     let _ = tracing::subscriber::set_global_default(subscriber);
 
+    PrometheusBuilder::new()
+        .with_http_listener(([0, 0, 0, 0], 9000))
+        .install()
+        .expect("failed to install Prometheus recorder");
+
+    // parse CLI and configuration
+    let cli = Cli::parse();
     let mut specs = cli.specs.clone();
     if specs.is_empty() {
         eprintln!("Usage: ingestor <agent_spec> [<agent_spec> ...]");
@@ -137,6 +147,37 @@ async fn main() -> Result<(), IngestorError> {
                 let mut reader = tokio::io::BufReader::new(canon_stdout).lines();
                 let sink = sink_clone.clone();
 
+            loop {
+                gauge!("canonicalizer_queue_len", rx.len() as f64);
+                tokio::select! {
+                    line = rx.recv() => {
+                        match line {
+                            Some(line) => {
+                                if canon_stdin.write_all(line.as_bytes()).await.is_err() {
+                                    counter!("canonicalizer_dropped_messages_total", 1);
+                                    break;
+                                }
+                                if canon_stdin.write_all(b"\n").await.is_err() {
+                                    counter!("canonicalizer_dropped_messages_total", 1);
+                                    break;
+                                }
+                                gauge!("canonicalizer_queue_len", rx.len() as f64);
+                            }
+                            None => {
+                                let _ = canon_child.kill().await;
+                                return;
+                            }
+                        }
+                    }
+                    res = reader.next_line() => {
+                        match res {
+                            Ok(Some(line)) => {
+                                if let Some(agg) = bar_agg.as_mut() {
+                                    if let Some(bar) = agg.process_line(&line) {
+                                        let out = serde_json::to_string(&bar).unwrap_or_default();
+                                        if let Err(e) = sink.send(&out).await {
+                                            tracing::error!(error=%e, "sink error");
+                                            counter!("canonicalizer_dropped_messages_total", 1);
                 loop {
                     tokio::select! {
                         line = rx.recv() => {
@@ -164,6 +205,9 @@ async fn main() -> Result<(), IngestorError> {
                                     } else if let Err(e) = sink.send(&line).await {
                                         tracing::error!(error=%e, "sink error");
                                     }
+                                } else if let Err(e) = sink.send(&line).await {
+                                    tracing::error!(error=%e, "sink error");
+                                    counter!("canonicalizer_dropped_messages_total", 1);
                                 }
                                 _ => break,
                             }
@@ -175,6 +219,12 @@ async fn main() -> Result<(), IngestorError> {
                     }
                 }
 
+            if let Some(agg) = bar_agg.as_mut() {
+                for bar in agg.drain() {
+                    let out = serde_json::to_string(&bar).unwrap_or_default();
+                    if let Err(e) = sink.send(&out).await {
+                        tracing::error!(error=%e, "sink error");
+                        counter!("canonicalizer_dropped_messages_total", 1);
                 if let Some(agg) = bar_agg.as_mut() {
                     for bar in agg.drain() {
                         let out = serde_json::to_string(&bar).unwrap_or_default();

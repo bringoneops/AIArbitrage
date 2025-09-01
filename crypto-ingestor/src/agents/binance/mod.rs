@@ -2,6 +2,7 @@ use futures_util::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
 use tokio_tungstenite::{connect_async, tungstenite::Message, MaybeTlsStream, WebSocketStream};
+use metrics::counter;
 
 use crate::{
     agent::Agent, config::Settings, error::IngestorError, http_client, parse::parse_decimal_str,
@@ -351,6 +352,7 @@ async fn connection_task(
                                                 })
                                                 .to_string();
                                                 if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
                                                     break;
                                                 }
                                             }
@@ -387,6 +389,7 @@ async fn connection_task(
                                                 let evt = L2Diff::new("binance", raw, bids, asks, ts);
                                                 let line = evt.to_json_line();
                                                 if tx.send(line).await.is_err() {
+                                                    counter!("canonicalizer_dropped_messages_total", 1);
                                                     break;
                                                 }
                                             }
@@ -473,6 +476,7 @@ async fn send_snapshots(
             Ok(snap) => {
                 let line = snap.to_json_line();
                 if tx.send(line).await.is_err() {
+                    counter!("canonicalizer_dropped_messages_total", 1);
                     break;
                 }
             }
