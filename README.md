@@ -47,6 +47,23 @@ ingestor --log-level info binance:btcusdt
 RUST_LOG=debug ingestor binance:btcusdt
 ```
 
+## Scaling across instances
+
+Distribute work across multiple processes with the `--instance-count` and
+`--instance-index` flags. `instance-count` specifies the total number of
+ingestor instances running in parallel, while `instance-index` (zero based)
+selects which portion of the agent specifications this process will handle.
+
+```bash
+# start two ingestors sharing three specs
+ingestor --instance-count 2 --instance-index 0 binance:btcusdt binance:ethusdt binance:ltcusdt
+ingestor --instance-count 2 --instance-index 1 binance:btcusdt binance:ethusdt binance:ltcusdt
+```
+
+Each process receives a disjoint subset of specs, enabling easy scale
+up or down by adjusting the instance count and restarting processes with the
+appropriate indices.
+
 ## Canonicalizer
 
 The `canonicalizer` crate provides both the `CanonicalService` library and a
