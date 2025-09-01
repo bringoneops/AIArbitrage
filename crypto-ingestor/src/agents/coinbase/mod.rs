@@ -349,6 +349,13 @@ async fn connection_task(
                                                     .map(|dt| dt.timestamp_millis())
                                                     .unwrap_or_default();
                                                 let evt = L2Diff::new("coinbase", raw, bids, asks, ts);
+                                                match evt.to_json_line() {
+                                                    Ok(line) => {
+                                                        if tx.send(line).await.is_err() { break; }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!(error=%e, "failed to serialize l2 diff");
+                                                    }
                                                 let line = evt.to_json_line();
                                                 if tx.send(line).await.is_err() {
                                                     counter!("canonicalizer_dropped_messages_total", 1);
@@ -387,6 +394,13 @@ async fn connection_task(
                                                     .collect::<Vec<[String; 2]>>();
                                                 let ts = chrono::Utc::now().timestamp_millis();
                                                 let evt = Snapshot::new("coinbase", raw, bids, asks, ts);
+                                                match evt.to_json_line() {
+                                                    Ok(line) => {
+                                                        if tx.send(line).await.is_err() { break; }
+                                                    }
+                                                    Err(e) => {
+                                                        tracing::error!(error=%e, "failed to serialize snapshot");
+                                                    }
                                                 let line = evt.to_json_line();
                                                 if tx.send(line).await.is_err() {
                                                     counter!("canonicalizer_dropped_messages_total", 1);
