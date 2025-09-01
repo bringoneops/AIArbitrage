@@ -1,20 +1,20 @@
 mod agent;
 mod agents;
+mod bar;
 mod config;
 mod error;
 mod http_client;
 mod parse;
-mod bar;
 mod sink;
 
 use agents::{available_agents, make_agent};
+use bar::BarAggregator;
 use canonicalizer::CanonicalService;
 use clap::Parser;
 use config::{Cli, Settings};
 use error::IngestorError;
 use sink::{DynSink, FileSink, StdoutSink};
-use bar::BarAggregator;
-use std::sync::Arc;
+use std::{sync::Arc, thread};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
@@ -70,98 +70,112 @@ async fn main() -> Result<(), IngestorError> {
             return Err(IngestorError::Other("failed to build canonicalizer".into()));
         }
     }
-    let (tx, rx) = mpsc::channel::<String>(100);
+    // create a channel per canonicalizer worker
+    // NOTE: switch to `mpsc::unbounded_channel` with backpressure metrics if lossless delivery is required
+    let worker_count = thread::available_parallelism().map_or(1, |n| n.get());
+    let mut txs = Vec::with_capacity(worker_count);
+    let mut rxs = Vec::with_capacity(worker_count);
+    for _ in 0..worker_count {
+        let (tx, rx) = mpsc::channel::<String>(100);
+        txs.push(tx);
+        rxs.push(rx);
+    }
 
-    // spawn watchdog for canonicalizer process
-    let canon_path_clone = canon_path.clone();
-    let sink_clone = sink.clone();
-    let bar_interval = cli.bars;
-    let canon_watchdog = tokio::spawn(async move {
-        let mut rx = rx;
-        let mut bar_agg = bar_interval.map(BarAggregator::new);
-        loop {
-            let mut cmd = Command::new(&canon_path_clone);
-            if bar_agg.is_some() {
-                cmd.arg("--json");
-            }
-            let mut canon_child = match cmd
-                .stdin(std::process::Stdio::piped())
-                .stdout(std::process::Stdio::piped())
-                .spawn()
-            {
-                Ok(child) => child,
-                Err(e) => {
-                    tracing::error!(error=%e, "failed to spawn canonicalizer");
-                    return;
-                }
-            };
-
-            let mut canon_stdin = canon_child.stdin.take().expect("canonicalizer stdin");
-            let canon_stdout = canon_child.stdout.take().expect("canonicalizer stdout");
-            let mut reader = tokio::io::BufReader::new(canon_stdout).lines();
-            let sink = sink_clone.clone();
-
+    // spawn watchdogs for canonicalizer processes
+    let mut canon_handles = Vec::new();
+    let bar_interval = cli.bars; // captured once for reuse
+    for rx in rxs.into_iter() {
+        let canon_path_clone = canon_path.clone();
+        let sink_clone = sink.clone();
+        canon_handles.push(tokio::spawn(async move {
+            let mut rx = rx;
+            let mut bar_agg = bar_interval.map(BarAggregator::new);
             loop {
-                tokio::select! {
-                    line = rx.recv() => {
-                        match line {
-                            Some(line) => {
-                                if canon_stdin.write_all(line.as_bytes()).await.is_err() { break; }
-                                if canon_stdin.write_all(b"\n").await.is_err() { break; }
-                            }
-                            None => {
-                                let _ = canon_child.kill().await;
-                                return;
-                            }
-                        }
+                let mut cmd = Command::new(&canon_path_clone);
+                if bar_agg.is_some() {
+                    cmd.arg("--json");
+                }
+                let mut canon_child = match cmd
+                    .stdin(std::process::Stdio::piped())
+                    .stdout(std::process::Stdio::piped())
+                    .spawn()
+                {
+                    Ok(child) => child,
+                    Err(e) => {
+                        tracing::error!(error=%e, "failed to spawn canonicalizer");
+                        return;
                     }
-                    res = reader.next_line() => {
-                        match res {
-                            Ok(Some(line)) => {
-                                if let Some(agg) = bar_agg.as_mut() {
-                                    if let Some(bar) = agg.process_line(&line) {
-                                        let out = serde_json::to_string(&bar).unwrap_or_default();
-                                        if let Err(e) = sink.send(&out).await {
-                                            tracing::error!(error=%e, "sink error");
-                                        }
-                                    }
-                                } else if let Err(e) = sink.send(&line).await {
-                                    tracing::error!(error=%e, "sink error");
+                };
+
+                let mut canon_stdin = canon_child.stdin.take().expect("canonicalizer stdin");
+                let canon_stdout = canon_child.stdout.take().expect("canonicalizer stdout");
+                let mut reader = tokio::io::BufReader::new(canon_stdout).lines();
+                let sink = sink_clone.clone();
+
+                loop {
+                    tokio::select! {
+                        line = rx.recv() => {
+                            match line {
+                                Some(line) => {
+                                    if canon_stdin.write_all(line.as_bytes()).await.is_err() { break; }
+                                    if canon_stdin.write_all(b"\n").await.is_err() { break; }
+                                }
+                                None => {
+                                    let _ = canon_child.kill().await;
+                                    return;
                                 }
                             }
-                            _ => break,
+                        }
+                        res = reader.next_line() => {
+                            match res {
+                                Ok(Some(line)) => {
+                                    if let Some(agg) = bar_agg.as_mut() {
+                                        if let Some(bar) = agg.process_line(&line) {
+                                            let out = serde_json::to_string(&bar).unwrap_or_default();
+                                            if let Err(e) = sink.send(&out).await {
+                                                tracing::error!(error=%e, "sink error");
+                                            }
+                                        }
+                                    } else if let Err(e) = sink.send(&line).await {
+                                        tracing::error!(error=%e, "sink error");
+                                    }
+                                }
+                                _ => break,
+                            }
+                        }
+                        status = canon_child.wait() => {
+                            tracing::warn!(?status, "canonicalizer exited; restarting");
+                            break;
                         }
                     }
-                    status = canon_child.wait() => {
-                        tracing::warn!(?status, "canonicalizer exited; restarting");
-                        break;
+                }
+
+                if let Some(agg) = bar_agg.as_mut() {
+                    for bar in agg.drain() {
+                        let out = serde_json::to_string(&bar).unwrap_or_default();
+                        if let Err(e) = sink.send(&out).await {
+                            tracing::error!(error=%e, "sink error");
+                        }
                     }
                 }
-            }
 
-            if let Some(agg) = bar_agg.as_mut() {
-                for bar in agg.drain() {
-                    let out = serde_json::to_string(&bar).unwrap_or_default();
-                    if let Err(e) = sink.send(&out).await {
-                        tracing::error!(error=%e, "sink error");
-                    }
-                }
+                let _ = canon_child.kill().await;
             }
-
-            let _ = canon_child.kill().await;
-        }
-    });
-// Initialise the canonical service before any agents are created so that
+        }));
+    }
+    // Initialise the canonical service before any agents are created so that
     // the required quote asset list is available for symbol comparisons.
     CanonicalService::init().await;
 
     let mut handles = Vec::new();
+    let mut next_worker = 0usize;
     for spec in specs.drain(..) {
         match make_agent(&spec, &settings).await {
             Some(mut agent) => {
                 let rx = shutdown_rx.clone(); // no need for `mut`
                 let name = agent.name();
-                let tx_clone = tx.clone();
+                let tx_clone = txs[next_worker].clone();
+                next_worker = (next_worker + 1) % txs.len();
                 tracing::info!(%spec, agent=%name, "spawning agent");
                 handles.push(tokio::spawn(async move {
                     if let Err(e) = agent.run(rx, tx_clone).await {
@@ -193,8 +207,10 @@ async fn main() -> Result<(), IngestorError> {
         }
     }
 
-    drop(tx);
-    let _ = canon_watchdog.await;
+    drop(txs);
+    for handle in canon_handles {
+        let _ = handle.await;
+    }
 
     Ok(())
 }
