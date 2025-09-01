@@ -182,20 +182,6 @@ impl Settings {
             .coinbase_api_secret
             .or_else(|| std::env::var("COINBASE_API_SECRET").ok());
         settings.trades = settings.trades || cli.trades;
-        settings.l2_diffs = settings.l2_diffs || cli.l2_diffs;
-        settings.l2_snapshots = settings.l2_snapshots || cli.l2_snapshots;
-        settings.book_ticker = settings.book_ticker || cli.book_ticker;
-        settings.ticker_24h = settings.ticker_24h || cli.ticker_24h;
-        settings.ohlcv = settings.ohlcv || cli.ohlcv;
-        settings.index_price = settings.index_price || cli.index_price;
-        settings.mark_price = settings.mark_price || cli.mark_price;
-        settings.funding_rates = settings.funding_rates || cli.funding_rates;
-        settings.top_dex_pools = settings.top_dex_pools || cli.top_dex_pools;
-        settings.news_headlines = settings.news_headlines || cli.news_headlines;
-        settings.telemetry = settings.telemetry || cli.telemetry;
-        settings.binance_futures_rest_url =
-            settings.binance_futures_rest_url.filter(|s| !s.is_empty());
-        settings.binance_futures_ws_url = settings.binance_futures_ws_url.filter(|s| !s.is_empty());
         Ok(settings)
     }
 }
