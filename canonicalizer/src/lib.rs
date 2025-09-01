@@ -35,11 +35,14 @@ pub struct CanonicalService;
 
 /// Cached list of Binance quote assets. Populated at startup via [`init`].
 static BINANCE_QUOTES: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
+static BINANCE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
+/// Cached list of Coinbase quote assets. Populated at startup via [`init`].
+static COINBASE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
 
 impl CanonicalService {
-    /// Initialise any resources required by the service. Currently this loads
-    /// the list of Binance quote assets from the public `exchangeInfo` endpoint
-    /// (unless provided via the `BINANCE_QUOTES` environment variable).
+    /// Initialise any resources required by the service. This loads the list of
+    /// quote assets for supported exchanges from their public endpoints (unless
+    /// provided via environment variables).
     ///
     /// If `BINANCE_QUOTES_REFRESH_INTERVAL_SECS` is set, a background task will
     /// periodically refresh the cached quotes.
@@ -92,6 +95,45 @@ impl CanonicalService {
                         CanonicalService::refresh_binance_quotes().await;
                     }
                 });
+    /// Network errors are logged and fall back to small built-in lists.
+    pub async fn init() {
+        if BINANCE_QUOTES.get().is_none() {
+            if let Ok(env) = std::env::var("BINANCE_QUOTES") {
+                let quotes = Self::parse_env_quotes(&env);
+                let _ = BINANCE_QUOTES.set(quotes);
+            } else {
+                match Self::fetch_binance_quotes().await {
+                    Ok(quotes) if !quotes.is_empty() => {
+                        let _ = BINANCE_QUOTES.set(quotes);
+                    }
+                    Ok(_) => {
+                        let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
+                    }
+                    Err(e) => {
+                        warn!("failed to fetch Binance quotes: {}", e);
+                        let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
+                    }
+                }
+            }
+        }
+
+        if COINBASE_QUOTES.get().is_none() {
+            if let Ok(env) = std::env::var("COINBASE_QUOTES") {
+                let quotes = Self::parse_env_quotes(&env);
+                let _ = COINBASE_QUOTES.set(quotes);
+            } else {
+                match Self::fetch_coinbase_quotes().await {
+                    Ok(quotes) if !quotes.is_empty() => {
+                        let _ = COINBASE_QUOTES.set(quotes);
+                    }
+                    Ok(_) => {
+                        let _ = COINBASE_QUOTES.set(Self::default_coinbase_quotes());
+                    }
+                    Err(e) => {
+                        warn!("failed to fetch Coinbase quotes: {}", e);
+                        let _ = COINBASE_QUOTES.set(Self::default_coinbase_quotes());
+                    }
+                }
             }
         }
     }
@@ -109,6 +151,10 @@ impl CanonicalService {
 
     fn binance_quotes() -> &'static RwLock<Vec<String>> {
         BINANCE_QUOTES.get_or_init(|| RwLock::new(Self::default_binance_quotes()))
+    }
+
+    fn coinbase_quotes() -> &'static Vec<String> {
+        COINBASE_QUOTES.get_or_init(Self::default_coinbase_quotes)
     }
 
     async fn fetch_binance_quotes() -> Result<Vec<String>, reqwest::Error> {
@@ -132,6 +178,27 @@ impl CanonicalService {
         Ok(quotes)
     }
 
+    async fn fetch_coinbase_quotes() -> Result<Vec<String>, reqwest::Error> {
+        let client = http_client::builder().build()?;
+        let v: serde_json::Value = client
+            .get("https://api.exchange.coinbase.com/products")
+            .send()
+            .await?
+            .json()
+            .await?;
+        let mut set = HashSet::new();
+        if let Some(products) = v.as_array() {
+            for prod in products {
+                if let Some(q) = prod.get("quote_currency").and_then(|q| q.as_str()) {
+                    set.insert(q.to_lowercase());
+                }
+            }
+        }
+        let mut quotes: Vec<String> = set.into_iter().collect();
+        quotes.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        Ok(quotes)
+    }
+
     fn parse_env_quotes(env: &str) -> Vec<String> {
         let mut quotes: Vec<String> = env
             .split(',')
@@ -144,6 +211,13 @@ impl CanonicalService {
 
     fn default_binance_quotes() -> Vec<String> {
         const DEFAULT: [&str; 7] = ["usdt", "usdc", "busd", "usd", "btc", "eth", "bnb"];
+        let mut quotes: Vec<String> = DEFAULT.iter().map(|q| q.to_string()).collect();
+        quotes.sort_by_key(|s| std::cmp::Reverse(s.len()));
+        quotes
+    }
+
+    fn default_coinbase_quotes() -> Vec<String> {
+        const DEFAULT: [&str; 8] = ["usdt", "usdc", "usd", "btc", "eth", "eur", "gbp", "dai"];
         let mut quotes: Vec<String> = DEFAULT.iter().map(|q| q.to_string()).collect();
         quotes.sort_by_key(|s| std::cmp::Reverse(s.len()));
         quotes
@@ -172,8 +246,7 @@ impl CanonicalService {
         }
 
         // Attempt to detect a known quote asset when no separator is present.
-        const QUOTES: [&str; 6] = ["usdt", "usdc", "usd", "btc", "eth", "eur"];
-        for q in QUOTES {
+        for q in Self::coinbase_quotes() {
             if lower.ends_with(q) {
                 let base = &lower[..lower.len() - q.len()];
                 if !base.is_empty() {
@@ -193,6 +266,13 @@ impl CanonicalService {
         if let Ok(mut guard) = lock.write() {
             *guard = qs;
         }
+    }
+
+    #[cfg(test)]
+    pub fn set_coinbase_quotes(quotes: Vec<&str>) {
+        let mut qs: Vec<String> = quotes.into_iter().map(|s| s.to_lowercase()).collect();
+        qs.sort_by(|a, b| b.len().cmp(&a.len()));
+        let _ = COINBASE_QUOTES.set(qs);
     }
 }
 
