@@ -67,8 +67,6 @@ pub struct BinanceAgent {
     ws_url: String,
     max_reconnect_delay_secs: u64,
     refresh_interval_mins: u64,
-    futures_ws_url: Option<String>,
-    futures_rest_url: Option<String>,
 }
 
 impl BinanceAgent {
@@ -83,8 +81,6 @@ impl BinanceAgent {
             ws_url: cfg.binance_ws_url.clone(),
             max_reconnect_delay_secs: cfg.binance_max_reconnect_delay_secs,
             refresh_interval_mins: cfg.binance_refresh_interval_mins,
-            futures_ws_url: cfg.binance_futures_ws_url.clone(),
-            futures_rest_url: cfg.binance_futures_rest_url.clone(),
         })
     }
 }
@@ -121,54 +117,6 @@ impl Agent for BinanceAgent {
             let tx_clone = out_tx.clone();
             handles.push(tokio::spawn(async move {
                 connection_task(rx, shutdown_rx, tx_clone, ws_url, max_delay).await;
-            }));
-        }
-        // additional aggregated streams not tied to symbol subsets
-        if let Some(ws_url) = &self.futures_ws_url {
-            let shutdown_clone = shutdown.clone();
-            let tx_clone = out_tx.clone();
-            let url = ws_url.clone();
-            handles.push(tokio::spawn(async move {
-                mark_price_task(&url, shutdown_clone, tx_clone).await;
-            }));
-
-            let shutdown_clone = shutdown.clone();
-            let tx_clone = out_tx.clone();
-            let url = ws_url.clone();
-            handles.push(tokio::spawn(async move {
-                funding_rate_task(&url, shutdown_clone, tx_clone).await;
-            }));
-
-            if self.open_interest {
-                let shutdown_clone = shutdown.clone();
-                let tx_clone = out_tx.clone();
-                let url = ws_url.clone();
-                handles.push(tokio::spawn(async move {
-                    open_interest_task(&url, shutdown_clone, tx_clone).await;
-                }));
-            }
-
-            let shutdown_clone = shutdown.clone();
-            let tx_clone = out_tx.clone();
-            let url = ws_url.clone();
-            handles.push(tokio::spawn(async move {
-                liquidation_task(&url, shutdown_clone, tx_clone).await;
-            }));
-        }
-
-        if let Some(rest_url) = &self.futures_rest_url {
-            let symbols_clone = self.symbols.clone();
-            let shutdown_clone = shutdown.clone();
-            let tx_clone = out_tx.clone();
-            let url = rest_url.clone();
-            handles.push(tokio::spawn(async move {
-                term_structure_task(symbols_clone, &url, shutdown_clone, tx_clone).await;
-            }));
-        }
-        for sym in self.symbols.clone() {
-            let tx_clone = out_tx.clone();
-            handles.push(tokio::spawn(async move {
-                snapshot_task(sym, tx_clone).await;
             }));
         }
 
@@ -396,27 +344,6 @@ async fn connection_task(
                                                     "ts": ts
                                                 })
                                                 .to_string();
-                                               let px = v
-                                                   .get("p")
-                                                   .and_then(|p| p.as_str())
-                                                   .and_then(parse_decimal_str)
-                                                   .unwrap_or_else(|| "?".to_string());
-                                               let qty = v
-                                                   .get("q")
-                                                   .and_then(|q| q.as_str())
-                                                   .and_then(parse_decimal_str)
-                                                   .unwrap_or_else(|| "?".to_string());
-                                               let ts = v.get("T").and_then(|x| x.as_i64()).unwrap_or_default();
-                                               let line = serde_json::json!({
-                                                   "agent": "binance",
-                                                   "type": "trade",
-                                                   "s": sym,
-                                                   "t": trade_id,
-                                                   "p": px,
-                                                   "q": qty,
-                                                   "ts": ts
-                                               })
-                                               .to_string();
                                                 if tx.send(line).await.is_err() {
                                                     break;
                                                 }

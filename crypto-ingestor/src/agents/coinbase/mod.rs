@@ -1,9 +1,3 @@
-pub mod metadata;
-pub mod ohlcv;
-
-use std::collections::HashSet;
-
-use futures_util::{SinkExt, StreamExt};
 use futures_util::{SinkExt, StreamExt};
 use std::collections::{HashMap, HashSet};
 use tokio::sync::mpsc;
@@ -170,6 +164,7 @@ async fn connection_task(
     max_reconnect_delay_secs: u64,
 ) {
     let mut attempt: u32 = 0;
+    let mut last_trade_ids: HashMap<String, i64> = HashMap::new();
 
     loop {
         if *shutdown.borrow() {
@@ -401,6 +396,7 @@ async fn connection_task(
                                                 if tx.send(line).await.is_ok() {
                                                 } else { break; }
                                             }
+                                            _ => {}
                                         }
                                     } else {
                                         tracing::warn!("non-json text msg");
