@@ -25,6 +25,16 @@ with the `--trades` flag:
 cargo run --release -- --trades binance:btcusdt
 ```
 
+## Logging
+
+Control verbosity with the `--log-level` flag or the `RUST_LOG` environment variable. The default level is `warn`.
+
+```bash
+ingestor --log-level warn binance:btcusdt
+ingestor --log-level info binance:btcusdt
+RUST_LOG=debug ingestor binance:btcusdt
+```
+
 ## Canonicalizer
 
 The `canonicalizer` crate provides both the `CanonicalService` library and a
