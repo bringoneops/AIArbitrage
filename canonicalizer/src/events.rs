@@ -1,4 +1,87 @@
-use serde::{Deserialize, Serialize};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use serde_json::Value;
+use std::collections::HashMap;
+
+fn ser_uppercase<S>(value: &String, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_str(&value.to_uppercase())
+}
+
+fn de_uppercase<'de, D>(deserializer: D) -> Result<String, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Ok(s.to_uppercase())
+}
+
+/// Canonical `BASE-QUOTE` symbol broken into base and quote components.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct Symbol {
+    pub base: String,
+    pub quote: String,
+}
+
+/// Side of the trade.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum Side {
+    Buy,
+    Sell,
+    Unknown,
+}
+
+/// Event type describing the origin of the message.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "UPPERCASE")]
+pub enum EventType {
+    Trade,
+    BookUpdate,
+    Ticker,
+    Heartbeat,
+}
+
+/// Fee information associated with a trade.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Fee {
+    pub asset: String,
+    pub amount: String,
+}
+
+/// Additional metadata for a trade event.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct TradeMeta {
+    pub maker: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub taker_order_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub fees: Vec<Fee>,
+    #[serde(flatten, default)]
+    pub extra: HashMap<String, Value>,
+}
+
+/// Normalised representation of a trade across exchanges.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct Trade {
+    #[serde(deserialize_with = "de_uppercase", serialize_with = "ser_uppercase")]
+    pub exchange: String,
+    pub symbol: Symbol,
+    pub trade_id: Option<String>,
+    pub price: String,
+    pub quantity: String,
+    pub side: Side,
+    pub timestamp: DateTime<Utc>,
+    pub timestamp_ms: i64,
+    pub event_type: EventType,
+    pub agent: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub meta: Option<TradeMeta>,
+    #[serde(flatten, default)]
+    pub extra: HashMap<String, Value>,
+}
 
 /// Candlestick bar (open-high-low-close-volume) for a trading pair.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -151,6 +234,50 @@ pub struct FeeSchedule {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::TimeZone;
+    use serde_json::Value;
+    use std::collections::HashMap;
+
+    #[test]
+    fn trade_serialises_and_deserialises() {
+        let ts = chrono::Utc.with_ymd_and_hms(2023, 1, 1, 0, 0, 0).unwrap();
+        let trade = Trade {
+            exchange: "binance".into(),
+            symbol: Symbol {
+                base: "BTC".into(),
+                quote: "USDT".into(),
+            },
+            trade_id: Some("123".into()),
+            price: "30000".into(),
+            quantity: "0.01".into(),
+            side: Side::Buy,
+            timestamp: ts,
+            timestamp_ms: ts.timestamp_millis(),
+            event_type: EventType::Trade,
+            agent: "ingestor".into(),
+            meta: Some(TradeMeta {
+                maker: true,
+                taker_order_id: Some("abc".into()),
+                fees: vec![Fee {
+                    asset: "USDT".into(),
+                    amount: "0.1".into(),
+                }],
+                extra: HashMap::new(),
+            }),
+            extra: HashMap::new(),
+        };
+
+        let json = serde_json::to_string(&trade).expect("serialize");
+        let v: Value = serde_json::from_str(&json).expect("json");
+        assert_eq!(v["exchange"], "BINANCE");
+        assert_eq!(v["side"], "BUY");
+        assert_eq!(v["event_type"], "TRADE");
+
+        let back: Trade = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(back.exchange, "BINANCE");
+        assert_eq!(back.side, Side::Buy);
+        assert_eq!(back.event_type, EventType::Trade);
+    }
 
     #[test]
     fn option_chain_serialises() {
