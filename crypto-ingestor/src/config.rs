@@ -77,10 +77,6 @@ pub struct Settings {
     pub telemetry: bool,
 }
 
-fn default_sink() -> String {
-    "stdout".into()
-}
-
 fn default_binance_options_poll_interval_secs() -> u64 {
     60
 }
