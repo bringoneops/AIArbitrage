@@ -230,40 +230,6 @@ async fn connection_task(
                                 Some(Ok(Message::Text(txt))) => {
                                     if let Ok(v) = serde_json::from_str::<serde_json::Value>(&txt) {
                                         let typ = v.get("type").and_then(|t| t.as_str()).unwrap_or("");
-                                        if typ == "match" {
-                                            let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
-                                            let sym = CanonicalService::canonical_pair("coinbase", raw).unwrap_or_else(|| raw.to_string());
-                                            let trade_id = v
-                                                .get("trade_id")
-                                                .and_then(|id| id.as_i64())
-                                                .filter(|id| *id > 0);
-                                            let price = v
-                                                .get("price")
-                                                .and_then(|p| p.as_str())
-                                                .and_then(parse_decimal_str)
-                                                .unwrap_or_else(|| "?".to_string());
-                                            let size = v
-                                                .get("size")
-                                                .and_then(|q| q.as_str())
-                                                .and_then(parse_decimal_str)
-                                                .unwrap_or_else(|| "?".to_string());
-                                            let ts = v
-                                                .get("time")
-                                                .and_then(|t| t.as_str())
-                                                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
-                                                .map(|dt| dt.timestamp_millis())
-                                                .unwrap_or_default();
-                                            let line = serde_json::json!({
-                                                "agent": "coinbase",
-                                                "type": "trade",
-                                                "s": sym,
-                                                "t": trade_id,
-                                                "p": price,
-                                                "q": size,
-                                                "ts": ts
-                                            }).to_string();
-                                            if tx.send(line).await.is_err() {
-                                                break;
                                         match typ {
                                             "match" => {
                                                 let raw = v.get("product_id").and_then(|s| s.as_str()).unwrap_or("?");
