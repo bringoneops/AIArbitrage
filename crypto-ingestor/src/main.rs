@@ -18,16 +18,25 @@ use std::sync::Arc;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::mpsc;
-use tracing_subscriber::FmtSubscriber;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() -> Result<(), IngestorError> {
-    // logger
-    let subscriber = FmtSubscriber::builder().with_target(false).finish();
-    let _ = tracing::subscriber::set_global_default(subscriber);
-
     // parse CLI and configuration
     let cli = Cli::parse();
+
+    // logger
+    let filter = if let Some(level) = cli.log_level.as_deref() {
+        EnvFilter::new(level)
+    } else {
+        EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("warn"))
+    };
+    let subscriber = FmtSubscriber::builder()
+        .with_env_filter(filter)
+        .with_target(false)
+        .finish();
+    let _ = tracing::subscriber::set_global_default(subscriber);
+
     let mut specs = cli.specs.clone();
     if specs.is_empty() {
         eprintln!("Usage: ingestor <agent_spec> [<agent_spec> ...]");
