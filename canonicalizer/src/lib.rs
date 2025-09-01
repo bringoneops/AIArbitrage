@@ -37,7 +37,6 @@ pub use events::{
 };
 
 use std::collections::{HashMap, HashSet};
-use std::collections::HashSet;
 use std::sync::{OnceLock, RwLock};
 
 use serde::{Deserialize, Serialize};
@@ -47,7 +46,6 @@ pub struct CanonicalService;
 
 /// Cached list of Binance quote assets. Populated at startup via [`init`].
 static BINANCE_QUOTES: OnceLock<RwLock<Vec<String>>> = OnceLock::new();
-static BINANCE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
 /// Cached list of Coinbase quote assets. Populated at startup via [`init`].
 static COINBASE_QUOTES: OnceLock<Vec<String>> = OnceLock::new();
 
@@ -114,45 +112,6 @@ impl CanonicalService {
                         CanonicalService::refresh_binance_quotes().await;
                     }
                 });
-    /// Network errors are logged and fall back to small built-in lists.
-    pub async fn init() {
-        if BINANCE_QUOTES.get().is_none() {
-            if let Ok(env) = std::env::var("BINANCE_QUOTES") {
-                let quotes = Self::parse_env_quotes(&env);
-                let _ = BINANCE_QUOTES.set(quotes);
-            } else {
-                match Self::fetch_binance_quotes().await {
-                    Ok(quotes) if !quotes.is_empty() => {
-                        let _ = BINANCE_QUOTES.set(quotes);
-                    }
-                    Ok(_) => {
-                        let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
-                    }
-                    Err(e) => {
-                        warn!("failed to fetch Binance quotes: {}", e);
-                        let _ = BINANCE_QUOTES.set(Self::default_binance_quotes());
-                    }
-                }
-            }
-        }
-
-        if COINBASE_QUOTES.get().is_none() {
-            if let Ok(env) = std::env::var("COINBASE_QUOTES") {
-                let quotes = Self::parse_env_quotes(&env);
-                let _ = COINBASE_QUOTES.set(quotes);
-            } else {
-                match Self::fetch_coinbase_quotes().await {
-                    Ok(quotes) if !quotes.is_empty() => {
-                        let _ = COINBASE_QUOTES.set(quotes);
-                    }
-                    Ok(_) => {
-                        let _ = COINBASE_QUOTES.set(Self::default_coinbase_quotes());
-                    }
-                    Err(e) => {
-                        warn!("failed to fetch Coinbase quotes: {}", e);
-                        let _ = COINBASE_QUOTES.set(Self::default_coinbase_quotes());
-                    }
-                }
             }
         }
     }
