@@ -1,6 +1,5 @@
 mod agent;
 mod agents;
-mod bar;
 mod config;
 mod error;
 mod http_client;
